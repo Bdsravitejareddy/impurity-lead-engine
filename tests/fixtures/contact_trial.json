@@ -1,0 +1,12 @@
+{
+  "protocolSection": {
+    "contactsLocationsModule": {
+      "overallOfficials": [
+        {"name": "Maya Patel", "affiliation": "Example Pharma", "role": "STUDY_CHAIR"}
+      ],
+      "centralContacts": [
+        {"name": "Maya Patel", "role": "CONTACT", "phone": "+1 212 555 0112", "email": "maya.patel@example.com"}
+      ]
+    }
+  }
+}

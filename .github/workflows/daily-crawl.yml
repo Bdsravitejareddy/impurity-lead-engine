@@ -1,0 +1,41 @@
+name: daily impurity lead crawl
+
+on:
+  schedule:
+    - cron: "17 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install .
+      - name: Prepare private company seeds
+        env:
+          COMPANY_SEEDS_CSV: ${{ secrets.COMPANY_SEEDS_CSV }}
+        run: |
+          if [ -n "$COMPANY_SEEDS_CSV" ]; then
+            mkdir -p seeds
+            printf '%s\n' "$COMPANY_SEEDS_CSV" > seeds/companies.csv
+          fi
+      - run: python scripts/run_daily.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          CRAWLER_USER_AGENT: ${{ secrets.CRAWLER_USER_AGENT }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: daily-opportunity-export
+          path: exports/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -1,0 +1,2 @@
+[console_scripts]
+impurity-leads = impurity_leads.cli:main

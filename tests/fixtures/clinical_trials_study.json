@@ -1,0 +1,27 @@
+{
+  "protocolSection": {
+    "identificationModule": {
+      "nctId": "NCT01234567",
+      "briefTitle": "A Phase 3 Study of EX-101"
+    },
+    "statusModule": {
+      "overallStatus": "RECRUITING",
+      "studyFirstPostDateStruct": {"date": "2026-08-01"},
+      "lastUpdatePostDateStruct": {"date": "2026-09-01"}
+    },
+    "sponsorCollaboratorsModule": {
+      "leadSponsor": {"name": "Example Pharma", "class": "INDUSTRY"}
+    },
+    "designModule": {
+      "phases": ["PHASE3"]
+    },
+    "armsInterventionsModule": {
+      "interventions": [
+        {"type": "DRUG", "name": "EX-101", "description": "oral small molecule"}
+      ]
+    },
+    "contactsLocationsModule": {
+      "locations": [{"country": "United States"}, {"country": "Germany"}]
+    }
+  }
+}

@@ -1,0 +1,165 @@
+from datetime import datetime, timezone
+from uuid import NAMESPACE_URL, UUID, uuid5
+
+from impurity_leads.contacts.models import RankedContact
+from impurity_leads.models import Opportunity, Signal
+from impurity_leads.normalize import normalize_company_name, normalize_molecule_name
+
+
+def _stable_uuid(kind: str, value: str) -> UUID:
+    return uuid5(NAMESPACE_URL, f"impurity-leads:{kind}:{value}")
+
+
+class SupabaseLeadStore:
+    def __init__(self, client):
+        self.client = client
+
+    def _company_id(self, company_name: str) -> str:
+        normalized = normalize_company_name(company_name)
+        company_id = str(_stable_uuid("company", normalized))
+        self.client.table("companies").upsert(
+            {
+                "id": company_id,
+                "normalized_name": normalized,
+                "legal_name": company_name,
+                "last_seen_at": datetime.now(timezone.utc).isoformat(),
+            },
+            on_conflict="id",
+        ).execute()
+        return company_id
+
+    def _molecule_id(self, molecule_name: str) -> str:
+        normalized = normalize_molecule_name(molecule_name)
+        molecule_id = str(_stable_uuid("molecule", normalized))
+        self.client.table("molecules").upsert(
+            {
+                "id": molecule_id,
+                "canonical_name": molecule_name,
+                "last_seen_at": datetime.now(timezone.utc).isoformat(),
+            },
+            on_conflict="id",
+        ).execute()
+        return molecule_id
+
+    def save_signal(self, signal: Signal) -> None:
+        company_id = self._company_id(signal.company_name)
+        molecule_id = self._molecule_id(signal.molecule_name) if signal.molecule_name else None
+        signal_id = str(_stable_uuid("signal", signal.fingerprint))
+        row = {
+            "id": signal_id,
+            "company_id": company_id,
+            "molecule_id": molecule_id,
+            "source_type": signal.source_type,
+            "signal_type": signal.signal_type,
+            "source_url": signal.source_url,
+            "source_record_id": signal.source_record_id,
+            "evidence_text": signal.evidence_text,
+            "event_date": signal.event_date.isoformat() if signal.event_date else None,
+            "discovered_at": signal.discovered_at.isoformat(),
+            "freshness_days": signal.freshness_days,
+            "base_weight": signal.base_weight,
+            "confidence": signal.confidence,
+            "fingerprint": signal.fingerprint,
+            "metadata_json": signal.metadata_json,
+        }
+        self.client.table("signals").upsert(row, on_conflict="fingerprint").execute()
+
+    def save_opportunity(self, opportunity: Opportunity) -> None:
+        company_id = self._company_id(opportunity.company_name)
+        molecule_id = self._molecule_id(opportunity.molecule_name)
+        opportunity_key = f"{company_id}:{molecule_id}"
+        opportunity_id = str(_stable_uuid("opportunity", opportunity_key))
+        now = datetime.now(timezone.utc).isoformat()
+        row = {
+            "id": opportunity_id,
+            "company_id": company_id,
+            "molecule_id": molecule_id,
+            "score": opportunity.score,
+            "priority": opportunity.priority,
+            "likely_need_type": opportunity.likely_need_type,
+            "rationale": opportunity.rationale,
+            "decision_maker_role": opportunity.decision_maker_role,
+            "last_qualified_at": now,
+            "last_signal_at": opportunity.last_signal_at.isoformat() if opportunity.last_signal_at else None,
+        }
+        self.client.table("opportunities").upsert(
+            row,
+            on_conflict="company_id,molecule_id",
+        ).execute()
+        for fingerprint in opportunity.signal_fingerprints:
+            signal_id = str(_stable_uuid("signal", fingerprint))
+            self.client.table("opportunity_signals").upsert(
+                {
+                    "opportunity_id": opportunity_id,
+                    "signal_id": signal_id,
+                    "contribution_score": 0,
+                },
+                on_conflict="opportunity_id,signal_id",
+            ).execute()
+
+    def _contact_id(self, company_id: str, normalized_name: str) -> str:
+        return str(_stable_uuid("contact", f"{company_id}:{normalized_name}"))
+
+    def _opportunity_id(self, opportunity: Opportunity) -> str:
+        company_id = str(_stable_uuid("company", normalize_company_name(opportunity.company_name)))
+        molecule_id = str(_stable_uuid("molecule", normalize_molecule_name(opportunity.molecule_name)))
+        return str(_stable_uuid("opportunity", f"{company_id}:{molecule_id}"))
+
+    def save_contact(self, company_name: str, ranked_contact: RankedContact) -> None:
+        company_id = self._company_id(company_name)
+        contact = ranked_contact.contact
+        contact_id = self._contact_id(company_id, contact.normalized_name)
+        row = {
+            "id": contact_id,
+            "company_id": company_id,
+            "normalized_name": contact.normalized_name,
+            "display_name": contact.display_name,
+            "title": contact.title,
+            "department": contact.department,
+            "profile_url": contact.profile_url,
+            "primary_email": contact.primary_email,
+            "email_status": contact.email_status,
+            "primary_phone": contact.primary_phone,
+            "phone_status": contact.phone_status,
+            "role_fit_score": contact.role_fit_score,
+            "contact_confidence": contact.contact_confidence,
+            "first_seen_at": contact.first_seen_at.isoformat() if contact.first_seen_at else None,
+            "last_seen_at": contact.last_seen_at.isoformat() if contact.last_seen_at else None,
+            "last_verified_at": contact.last_verified_at.isoformat() if contact.last_verified_at else None,
+        }
+        self.client.table("contacts").upsert(row, on_conflict="company_id,normalized_name").execute()
+        for evidence in contact.evidence:
+            evidence_row = {
+                "id": str(_stable_uuid("contact-evidence", evidence.fingerprint)),
+                "contact_id": contact_id,
+                "evidence_type": evidence.evidence_type,
+                "observed_value": evidence.observed_value,
+                "source_type": evidence.source_type,
+                "source_url": evidence.source_url,
+                "evidence_text": evidence.evidence_text[:800],
+                "observed_at": evidence.observed_at.isoformat(),
+                "fingerprint": evidence.fingerprint,
+                "metadata_json": evidence.metadata_json,
+            }
+            self.client.table("contact_evidence").upsert(evidence_row, on_conflict="fingerprint").execute()
+
+    def link_opportunity_contact(self, opportunity: Opportunity, ranked_contact: RankedContact) -> None:
+        company_id = self._company_id(opportunity.company_name)
+        contact_id = self._contact_id(company_id, ranked_contact.contact.normalized_name)
+        opportunity_id = self._opportunity_id(opportunity)
+        self.client.table("opportunity_contacts").upsert(
+            {
+                "opportunity_id": opportunity_id,
+                "contact_id": contact_id,
+                "role_fit_score": ranked_contact.contact.role_fit_score,
+                "rank": ranked_contact.rank,
+                "rationale": ranked_contact.rationale,
+            },
+            on_conflict="opportunity_id,contact_id",
+        ).execute()
+
+
+def create_supabase_store(url: str, secret_key: str) -> SupabaseLeadStore:
+    from supabase import create_client
+
+    return SupabaseLeadStore(create_client(url, secret_key))

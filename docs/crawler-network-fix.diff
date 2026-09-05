@@ -1,0 +1,468 @@
+--- a/src/impurity_leads/adapters/common_crawl.py
++++ b/src/impurity_leads/adapters/common_crawl.py
+@@ -2,7 +2,7 @@
+ import time
+ from urllib.parse import urlparse
+ 
+-import httpx
++from impurity_leads.crawling.client import create_crawl_client
+ 
+ DEFAULT_TERMS = (
+     "career",
+@@ -53,7 +53,7 @@
+         max_urls_per_domain: int = 40,
+         sleep_fn=time.sleep,
+     ):
+-        self.client = client or httpx.Client(timeout=20.0, follow_redirects=True)
++        self.client = client or create_crawl_client()
+         self.user_agent = user_agent
+         self.max_urls_per_domain = max_urls_per_domain
+         self.sleep_fn = sleep_fn
+--- a/src/impurity_leads/cli.py
++++ b/src/impurity_leads/cli.py
+@@ -3,8 +3,6 @@
+ import time
+ from datetime import datetime, timezone
+ from pathlib import Path
+-
+-import httpx
+ 
+ from impurity_leads.adapters.clinical_trials import ClinicalTrialsAdapter
+ from impurity_leads.adapters.company_site import CompanySiteAdapter
+@@ -14,6 +12,7 @@
+ from impurity_leads.contacts.discovery import contact_candidate_urls
+ from impurity_leads.contacts.models import RankedContact
+ from impurity_leads.contacts.pipeline import enrich_opportunity_contacts
++from impurity_leads.crawling.client import create_crawl_client
+ from impurity_leads.crawling.fetch import HttpFetcher
+ from impurity_leads.crawling.robots import RobotsPolicy
+ from impurity_leads.crawling.sitemap import extract_sitemap_urls
+@@ -53,7 +52,7 @@
+     return {"User-Agent": user_agent, "Accept": "application/json"}
+ 
+ 
+-def _log_source_http_error(source: str, error: httpx.HTTPError) -> None:
++def _log_source_http_error(source: str, error: Exception) -> None:
+     response = getattr(error, "response", None)
+     status = getattr(response, "status_code", None)
+     if status is not None:
+@@ -82,7 +81,7 @@
+         trial_adapter = ClinicalTrialsAdapter()
+         for study in trials_payload.get("studies", []):
+             records.extend(trial_adapter.parse(study))
+-    except httpx.HTTPError as error:
++    except Exception as error:
+         _log_source_http_error("clinical_trials", error)
+ 
+     try:
+@@ -96,7 +95,7 @@
+         fda_adapter = FDAAdapter()
+         for result in fda_payload.get("results", []):
+             records.extend(fda_adapter.parse(result))
+-    except httpx.HTTPError as error:
++    except Exception as error:
+         _log_source_http_error("fda", error)
+ 
+     return records
+@@ -119,60 +118,59 @@
+     for seed in load_company_seeds(seed_path):
+         if deadline_monotonic is not None and monotonic_fn() >= deadline_monotonic:
+             break
+-        base_url = f"https://{seed.domain}"
+-        robots_response = client.get(
+-            f"{base_url}/robots.txt",
+-            headers={"User-Agent": settings.user_agent},
+-        )
+-        if getattr(robots_response, "status_code", 200) in {401, 403}:
++        try:
++            base_url = f"https://{seed.domain}"
++            robots_policy = RobotsPolicy.fetch(client, base_url, settings.user_agent)
++            if robots_policy.disallow_all:
++                continue
++            fetcher = HttpFetcher(
++                client=client,
++                robots_policy=robots_policy,
++                user_agent=settings.user_agent,
++                max_retries=settings.max_retries,
++                sleep_fn=sleep_fn,
++            )
++
++            sitemap_urls: list[str] = []
++            sitemap_xml = fetcher.fetch(f"{base_url}/sitemap.xml")
++            if sitemap_xml:
++                try:
++                    sitemap_urls = extract_sitemap_urls(sitemap_xml)
++                except (ValueError, TypeError):
++                    sitemap_urls = []
++                except Exception:
++                    sitemap_urls = []
++
++            common_urls: list[str] = []
++            try:
++                common_urls = CommonCrawlAdapter(
++                    client=client,
++                    user_agent=settings.user_agent,
++                    max_urls_per_domain=10,
++                    sleep_fn=sleep_fn,
++                ).discover(seed.domain)
++            except Exception:
++                common_urls = []
++
++            for url in relevant_candidate_urls(seed.domain, sitemap_urls, common_urls, cap=15):
++                if deadline_monotonic is not None and monotonic_fn() >= deadline_monotonic:
++                    break
++                html = fetcher.fetch(url)
++                if not html:
++                    continue
++                records.extend(
++                    site_adapter.parse_html(
++                        url=url,
++                        html=html,
++                        company_name=seed.company_name,
++                        molecule_candidates=seed.molecules,
++                    )
++                )
++                if settings.per_domain_delay_seconds > 0:
++                    sleep_fn(settings.per_domain_delay_seconds)
++        except Exception as error:
++            _log_source_http_error(f"company={seed.domain}", error)
+             continue
+-        robots_text = robots_response.text if getattr(robots_response, "status_code", 200) == 200 else ""
+-        robots_policy = RobotsPolicy.from_text(robots_text, base_url, settings.user_agent)
+-        fetcher = HttpFetcher(
+-            client=client,
+-            robots_policy=robots_policy,
+-            user_agent=settings.user_agent,
+-            max_retries=settings.max_retries,
+-            sleep_fn=sleep_fn,
+-        )
+-
+-        sitemap_urls: list[str] = []
+-        sitemap_xml = fetcher.fetch(f"{base_url}/sitemap.xml")
+-        if sitemap_xml:
+-            try:
+-                sitemap_urls = extract_sitemap_urls(sitemap_xml)
+-            except (ValueError, TypeError):
+-                sitemap_urls = []
+-            except Exception:
+-                sitemap_urls = []
+-
+-        common_urls: list[str] = []
+-        try:
+-            common_urls = CommonCrawlAdapter(
+-                client=client,
+-                user_agent=settings.user_agent,
+-                max_urls_per_domain=10,
+-                sleep_fn=sleep_fn,
+-            ).discover(seed.domain)
+-        except Exception:
+-            common_urls = []
+-
+-        for url in relevant_candidate_urls(seed.domain, sitemap_urls, common_urls, cap=15):
+-            if deadline_monotonic is not None and monotonic_fn() >= deadline_monotonic:
+-                break
+-            html = fetcher.fetch(url)
+-            if not html:
+-                continue
+-            records.extend(
+-                site_adapter.parse_html(
+-                    url=url,
+-                    html=html,
+-                    company_name=seed.company_name,
+-                    molecule_candidates=seed.molecules,
+-                )
+-            )
+-            if settings.per_domain_delay_seconds > 0:
+-                sleep_fn(settings.per_domain_delay_seconds)
+     return records
+ 
+ 
+@@ -236,14 +234,9 @@
+             continue
+         try:
+             base_url = f"https://{seed.domain}"
+-            robots_response = client.get(
+-                f"{base_url}/robots.txt",
+-                headers={"User-Agent": settings.user_agent},
+-            )
+-            if getattr(robots_response, "status_code", 200) in {401, 403}:
++            robots_policy = RobotsPolicy.fetch(client, base_url, settings.user_agent)
++            if robots_policy.disallow_all:
+                 continue
+-            robots_text = robots_response.text if getattr(robots_response, "status_code", 200) == 200 else ""
+-            robots_policy = RobotsPolicy.from_text(robots_text, base_url, settings.user_agent)
+             fetcher = HttpFetcher(
+                 client=client,
+                 robots_policy=robots_policy,
+@@ -295,7 +288,8 @@
+             for contact in ranked:
+                 store.save_contact(opportunity.company_name, contact)
+                 store.link_opportunity_contact(opportunity, contact)
+-        except Exception:
++        except Exception as error:
++            _log_source_http_error(f"contacts={seed.domain}", error)
+             continue
+     return contact_map
+ 
+@@ -340,7 +334,7 @@
+     else:
+         store = MemoryLeadStore()
+ 
+-    with httpx.Client(timeout=settings.request_timeout_seconds, follow_redirects=True) as client:
++    with create_crawl_client(timeout=settings.request_timeout_seconds) as client:
+         records = collect_daily_records(
+             client,
+             settings=settings,
+--- /dev/null
++++ b/src/impurity_leads/crawling/client.py
+@@ -0,0 +1,19 @@
++"""HTTP configuration for public crawling, independent of database clients."""
++
++import httpx
++
++
++def _reject_https_downgrade(response: httpx.Response) -> None:
++    if response.has_redirect_location and response.url.scheme == "https":
++        target = response.url.join(response.headers["location"])
++        if target.scheme == "http":
++            raise httpx.RequestError("HTTPS redirect downgrade blocked", request=response.request)
++
++
++def create_crawl_client(timeout: float = 20.0) -> httpx.Client:
++    return httpx.Client(
++        timeout=timeout,
++        follow_redirects=True,
++        trust_env=False,
++        event_hooks={"response": [_reject_https_downgrade]},
++    )
+--- a/src/impurity_leads/crawling/fetch.py
++++ b/src/impurity_leads/crawling/fetch.py
+@@ -3,6 +3,8 @@
+ from typing import Protocol
+ 
+ import httpx
++
++from impurity_leads.crawling.client import create_crawl_client
+ 
+ 
+ class RobotsLike(Protocol):
+@@ -18,7 +20,7 @@
+         max_retries: int = 2,
+         sleep_fn=time.sleep,
+     ):
+-        self.client = client or httpx.Client(follow_redirects=True, timeout=20.0)
++        self.client = client or create_crawl_client()
+         self.robots_policy = robots_policy
+         self.user_agent = user_agent
+         self.max_retries = max_retries
+--- a/src/impurity_leads/crawling/robots.py
++++ b/src/impurity_leads/crawling/robots.py
+@@ -1,11 +1,14 @@
+ from urllib.parse import urljoin
+ from urllib.robotparser import RobotFileParser
++
++import httpx
+ 
+ 
+ class RobotsPolicy:
+     def __init__(self, parser: RobotFileParser, user_agent: str):
+         self._parser = parser
+         self.user_agent = user_agent
++        self.disallow_all = False
+ 
+     @classmethod
+     def from_text(cls, text: str, base_url: str, user_agent: str) -> "RobotsPolicy":
+@@ -14,5 +17,24 @@
+         parser.parse(text.splitlines())
+         return cls(parser=parser, user_agent=user_agent)
+ 
++    @classmethod
++    def fetch(cls, client, base_url: str, user_agent: str) -> "RobotsPolicy":
++        response = client.get(
++            f"{base_url.rstrip('/')}/robots.txt", headers={"User-Agent": user_agent}
++        )
++        status = getattr(response, "status_code", 200)
++        if status == 404:
++            text = ""
++        elif status in {401, 403}:
++            text = "User-agent: *\nDisallow: /"
++        elif status == 200:
++            text = response.text
++        else:
++            # An unavailable policy is not evidence that crawling is allowed.
++            raise httpx.HTTPError(f"robots unavailable status={status}")
++        policy = cls.from_text(text, base_url, user_agent)
++        policy.disallow_all = status in {401, 403}
++        return policy
++
+     def can_fetch(self, url: str) -> bool:
+         return self._parser.can_fetch(self.user_agent, url)
+--- /dev/null
++++ b/tests/test_network_resilience.py
+@@ -0,0 +1,166 @@
++import json
++import socket
++import ssl
++from pathlib import Path
++
++import httpx
++import pytest
++
++from impurity_leads import cli
++from impurity_leads.adapters.common_crawl import CommonCrawlAdapter
++from impurity_leads.config import Settings
++from impurity_leads.crawling.fetch import HttpFetcher
++
++
++ERRORS = [socket.gaierror("DNS failed"), ssl.SSLError("TLS failed"),
++          httpx.ConnectError("TLS failed"), httpx.ReadTimeout("timed out")]
++
++
++def seeds_file(tmp_path):
++    path = tmp_path / "companies.csv"
++    path.write_text("company_name,domain,molecules\nBroken,broken.example,Drug X\nExample Pharma,example.com,Drug X\n")
++    return path
++
++
++def company_response(request):
++    if request.url.path == "/robots.txt":
++        return httpx.Response(404)
++    if request.url.path == "/sitemap.xml":
++        return httpx.Response(200, text='<urlset><url><loc>https://example.com/jobs/1</loc></url></urlset>')
++    if request.url.path == "/jobs/1":
++        return httpx.Response(200, text=Path("tests/fixtures/company_job.html").read_text())
++    return httpx.Response(404)
++
++
++@pytest.mark.parametrize("error", ERRORS)
++@pytest.mark.parametrize("stage", ["/robots.txt", "/sitemap.xml", "/jobs/1"])
++def test_company_network_failure_keeps_next_company(tmp_path, error, stage):
++    calls = []
++    def handler(request):
++        calls.append(str(request.url))
++        if request.url.host == "broken.example":
++            if request.url.path == stage:
++                raise error
++            if request.url.path == "/sitemap.xml":
++                return httpx.Response(200, text='<urlset><url><loc>https://broken.example/jobs/1</loc></url></urlset>')
++        return company_response(request)
++    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
++        records = cli.fetch_seeded_company_records(client, seeds_file(tmp_path),
++            Settings(max_retries=0, per_domain_delay_seconds=0), sleep_fn=lambda _: None)
++    assert any(r.company_name_raw == "Example Pharma" for r in records)
++    assert f"https://broken.example{stage}" in calls
++    assert all(url.startswith("https://") for url in calls)
++
++
++@pytest.mark.parametrize("status, allowed", [(404, True), (403, False), (401, False), (503, False), (429, False)])
++def test_robots_status_controls_company_crawl(tmp_path, status, allowed):
++    calls = []
++    def handler(request):
++        calls.append(str(request.url))
++        if request.url.path == "/robots.txt":
++            return httpx.Response(status, text="an error page")
++        return company_response(request)
++    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
++        records = cli.fetch_seeded_company_records(client, seeds_file(tmp_path),
++            Settings(max_retries=0, per_domain_delay_seconds=0), sleep_fn=lambda _: None)
++    assert bool(records) is allowed
++    if not allowed:
++        assert all(url.endswith("/robots.txt") for url in calls)
++
++
++@pytest.mark.parametrize("error", ERRORS + [ValueError("invalid JSON")])
++@pytest.mark.parametrize("failed_host", ["clinicaltrials.gov", "api.fda.gov"])
++def test_failed_structured_source_keeps_other_source(error, failed_host):
++    def handler(request):
++        if request.url.host == failed_host:
++            raise error
++        fixture = "clinical_trials_study.json" if request.url.host == "clinicaltrials.gov" else "fda_record.json"
++        payload = json.loads((Path("tests/fixtures") / fixture).read_text())
++        return httpx.Response(200, json={"studies" if request.url.host == "clinicaltrials.gov" else "results": [payload]})
++    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
++        records = cli.fetch_structured_records(client)
++    assert records
++    assert all(failed_host not in r.source_url for r in records)
++
++
++@pytest.mark.parametrize("factory", [HttpFetcher, CommonCrawlAdapter])
++def test_owned_crawler_clients_ignore_environment_cert_settings(monkeypatch, factory):
++    monkeypatch.setenv("SSL_CERT_FILE", "/nonexistent/crawler-test.pem")
++    component = factory()
++    component.client.close()
++
++
++def test_daily_client_ignores_environment_cert_settings(monkeypatch, tmp_path):
++    monkeypatch.setenv("SSL_CERT_FILE", "/nonexistent/crawler-test.pem")
++    monkeypatch.setattr(cli, "load_settings", lambda: Settings())
++    monkeypatch.setattr(cli, "_project_root", lambda: tmp_path)
++    monkeypatch.setattr(cli, "collect_daily_records", lambda *a, **kw: [])
++    monkeypatch.setattr(cli, "_export", lambda *a, **kw: None)
++    assert cli.run_daily() == 0
++
++
++def test_owned_client_blocks_https_to_http_redirect_before_request(monkeypatch):
++    calls = []
++    def handler(request):
++        calls.append(str(request.url))
++        return httpx.Response(302, headers={"Location": "http://example.com/plain"})
++    original = httpx.Client
++    monkeypatch.setattr(httpx, "Client", lambda **kw: original(transport=httpx.MockTransport(handler), **kw))
++    fetcher = HttpFetcher(max_retries=0)
++    try:
++        assert fetcher.fetch("https://example.com/secure") is None
++    finally:
++        fetcher.client.close()
++    assert calls == ["https://example.com/secure"]
++
++
++def test_daily_collection_survives_all_external_sources_failing(tmp_path):
++    def handler(request):
++        if request.url.host in {"clinicaltrials.gov", "api.fda.gov", "index.commoncrawl.org"}:
++            raise httpx.ConnectError("source unavailable")
++        return company_response(request)
++    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
++        records = cli.collect_daily_records(client, Settings(max_retries=0, per_domain_delay_seconds=0),
++            seeds_file(tmp_path), sleep_fn=lambda _: None)
++    assert any(r.company_name_raw == "Example Pharma" for r in records)
++
++
++def test_owned_client_follows_https_redirect_to_missing_robots(monkeypatch):
++    from impurity_leads.crawling.robots import RobotsPolicy
++
++    def handler(request):
++        if request.url.host == "example.com":
++            return httpx.Response(301, headers={"Location": "https://www.example.com/robots.txt"})
++        return httpx.Response(404)
++    original = httpx.Client
++    monkeypatch.setattr(httpx, "Client", lambda **kw: original(transport=httpx.MockTransport(handler), **kw))
++    fetcher = HttpFetcher()
++    try:
++        policy = RobotsPolicy.fetch(fetcher.client, "https://example.com", "crawler")
++        assert policy.can_fetch("https://example.com/jobs/1")
++    finally:
++        fetcher.client.close()
++
++
++@pytest.mark.parametrize("error", ERRORS)
++def test_contact_enrichment_keeps_next_company_after_network_failure(tmp_path, error):
++    from impurity_leads.models import Opportunity
++    from impurity_leads.storage.memory import MemoryLeadStore
++
++    def handler(request):
++        if request.url.host == "broken.example":
++            raise error
++        if request.url.path == "/sitemap.xml":
++            return httpx.Response(200, text='<urlset><url><loc>https://example.com/leadership</loc></url></urlset>')
++        if request.url.path == "/leadership":
++            return httpx.Response(200, text=Path("tests/fixtures/contact_leadership.html").read_text())
++        return httpx.Response(404)
++    opportunities = [Opportunity(company_name=name, molecule_name="Drug X", score=90,
++        priority="HOT", likely_need_type=["nitrosamine/NDSRI"], rationale="test")
++        for name in ["Broken", "Example Pharma"]]
++    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
++        contacts = cli.enrich_qualified_opportunities(opportunities, client=client,
++            settings=Settings(max_retries=0, per_domain_delay_seconds=0),
++            seed_path=seeds_file(tmp_path), store=MemoryLeadStore(), sleep_fn=lambda _: None)
++    assert contacts[("Example Pharma", "Drug X")]
++    assert ("Broken", "Drug X") not in contacts

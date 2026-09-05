@@ -1,0 +1,11 @@
+{
+  "application_number": "NDA123456",
+  "sponsor_name": "Example Pharma",
+  "openfda": {
+    "substance_name": ["Drug X"],
+    "manufacturer_name": ["Example Pharma"]
+  },
+  "products": [
+    {"active_ingredients": [{"name": "Drug X", "strength": "10MG"}], "dosage_form": "TABLET"}
+  ]
+}
