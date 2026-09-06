@@ -9,11 +9,12 @@ def _row(company_id, molecule_id, score=22, domain="example.com", latest="2026-0
         "company_id": company_id, "molecule_id": molecule_id, "company": "Example Pharma",
         "molecule": "Drug X", "domain": domain, "score": score,
         "latest_event": latest, "signal_types": types or ["regulatory_application"],
+        "source_url": "https://api.fda.gov/example", "source_record_id": "ANDA1",
         "excluded": False,
     }
 
 
-def test_select_candidates_filters_before_limit_and_orders_deterministically():
+def test_select_candidates_keeps_missing_domains_and_orders_deterministically():
     rows = [
         _row("z", "1", domain=""),
         _row("b", "2", latest="2026-09-03T00:00:00+00:00"),
@@ -24,6 +25,25 @@ def test_select_candidates_filters_before_limit_and_orders_deterministically():
     selected = select_candidates(rows, limit=2)
 
     assert [(item.company_id, item.molecule_id) for item in selected] == [("a", "3"), ("b", "2")]
+
+
+def test_local_domain_override_is_used_without_mutating_candidate_source_data():
+    selected = select_candidates([_row("a", "3", domain="")], domain_overrides={"Example Pharma": "example.com"})
+
+    assert selected[0].domain == "example.com"
+    assert selected[0].stored_domain == ""
+    assert selected[0].domain_override == "example.com"
+
+
+def test_selection_report_marks_domain_optional_sources():
+    candidate = select_candidates([_row("a", "3", domain="")])[0]
+
+    report = candidate.selection_report()
+
+    assert report["current_stored_domain"] == ""
+    assert report["company_site_search_available"] is False
+    assert report["publication_patent_regulatory_can_proceed_without_domain"] is True
+    assert report["source_url"] == "https://api.fda.gov/example"
 
 
 def test_accept_evidence_requires_explicit_company_molecule_and_technical_term():

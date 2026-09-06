@@ -94,9 +94,15 @@ def main():
     parser.add_argument("--limit", type=int, default=5)
     parser.add_argument("--max-pages", type=int, default=8)
     parser.add_argument("--budget-seconds", type=float, default=120.0)
+    parser.add_argument("--select-only", action="store_true")
+    parser.add_argument("--domain-overrides", type=Path)
     args = parser.parse_args()
     rows = json.loads(args.candidates.read_text(encoding="utf-8"))
-    candidates = select_candidates(rows, limit=args.limit)
+    overrides = json.loads(args.domain_overrides.read_text(encoding="utf-8")) if args.domain_overrides else {}
+    candidates = select_candidates(rows, limit=args.limit, domain_overrides=overrides)
+    if args.select_only:
+        print(json.dumps([candidate.selection_report() for candidate in candidates], indent=2))
+        return
     report = run_spike(candidates, enrich_candidate, max_pages=args.max_pages, budget_seconds=args.budget_seconds)
     print(json.dumps(report, indent=2, default=str))
 

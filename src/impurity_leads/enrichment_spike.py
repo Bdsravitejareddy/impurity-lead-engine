@@ -30,6 +30,23 @@ class Candidate:
     initial_score: int
     initial_records: list[SourceRecord] = field(default_factory=list)
     latest_event: str | None = None
+    stored_domain: str = ""
+    domain_override: str | None = None
+    source_url: str | None = None
+    source_record_id: str | None = None
+
+    def selection_report(self) -> dict:
+        return {
+            "company": self.company_name,
+            "molecule": self.molecule,
+            "initial_score": self.initial_score,
+            "latest_regulatory_event": self.latest_event,
+            "current_stored_domain": self.stored_domain,
+            "source_url": self.source_url,
+            "source_record_id": self.source_record_id,
+            "company_site_search_available": _usable_domain(self.domain),
+            "publication_patent_regulatory_can_proceed_without_domain": True,
+        }
 
 
 def _latest(value):
@@ -50,21 +67,25 @@ def _usable_domain(value: str | None) -> bool:
     return bool(domain and "." in domain and " " not in domain and all(part for part in domain.split(".")))
 
 
-def select_candidates(rows: Iterable[dict], limit: int = 5) -> list[Candidate]:
+def select_candidates(rows: Iterable[dict], limit: int = 5, domain_overrides: dict[str, str] | None = None) -> list[Candidate]:
+    domain_overrides = domain_overrides or {}
     eligible = []
     for row in rows:
         types = {str(item) for item in (row.get("signal_types") or [])}
         score = row.get("score")
         if (not row.get("company_id") or not row.get("molecule_id") or
                 not row.get("company") or not row.get("molecule") or
-                not _usable_domain(row.get("domain")) or row.get("excluded") or
-                types != {"regulatory_application"} or not isinstance(score, (int, float)) or
+                row.get("excluded") or types != {"regulatory_application"} or not isinstance(score, (int, float)) or
                 not 20 <= score <= 24 or row.get("has_opportunity")):
             continue
+        stored_domain = str(row.get("domain") or "").strip().lower().removeprefix("www.")
+        override = domain_overrides.get(str(row["company"]))
+        domain = str(override or stored_domain).strip().lower().removeprefix("www.")
         eligible.append(Candidate(str(row["company_id"]), str(row["molecule_id"]),
                                   str(row["company"]), str(row["molecule"]),
-                                  str(row["domain"]).strip().lower().removeprefix("www."), int(score),
-                                  list(row.get("initial_records") or []), row.get("latest_event")))
+                                  domain, int(score), list(row.get("initial_records") or []), row.get("latest_event"),
+                                  stored_domain=stored_domain, domain_override=override,
+                                  source_url=row.get("source_url"), source_record_id=row.get("source_record_id")))
     eligible.sort(key=lambda c: (-c.initial_score, -_latest(c.latest_event).timestamp(), c.company_id, c.molecule_id))
     return eligible[:max(0, limit)]
 
