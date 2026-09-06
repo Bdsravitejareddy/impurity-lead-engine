@@ -1,0 +1,69 @@
+from datetime import datetime, timezone
+
+from impurity_leads.enrichment_spike import Candidate, accept_evidence, run_spike, select_candidates
+from impurity_leads.models import SourceRecord
+
+
+def _row(company_id, molecule_id, score=22, domain="example.com", latest="2026-09-01T00:00:00+00:00", types=None):
+    return {
+        "company_id": company_id, "molecule_id": molecule_id, "company": "Example Pharma",
+        "molecule": "Drug X", "domain": domain, "score": score,
+        "latest_event": latest, "signal_types": types or ["regulatory_application"],
+        "excluded": False,
+    }
+
+
+def test_select_candidates_filters_before_limit_and_orders_deterministically():
+    rows = [
+        _row("z", "1", domain=""),
+        _row("b", "2", latest="2026-09-03T00:00:00+00:00"),
+        _row("a", "3", latest="2026-09-03T00:00:00+00:00"),
+        _row("c", "4", score=40),
+    ]
+
+    selected = select_candidates(rows, limit=2)
+
+    assert [(item.company_id, item.molecule_id) for item in selected] == [("a", "3"), ("b", "2")]
+
+
+def test_accept_evidence_requires_explicit_company_molecule_and_technical_term():
+    candidate = Candidate("c", "m", "Example Pharma", "Drug X", "example.com", 22)
+    valid = SourceRecord(source_name="site", source_type="site", source_url="https://example.com/a",
+                         fetched_at=datetime.now(timezone.utc), company_name_raw="Example Pharma",
+                         molecule_name_raw="Drug X", signal_text="Drug X impurity characterization")
+    generic = valid.model_copy(update={"signal_text": "Example Pharma latest news"})
+
+    assert accept_evidence(candidate, valid) is True
+    assert accept_evidence(candidate, generic) is False
+
+
+def test_spike_stops_after_first_promoted_candidate_and_enforces_page_bound():
+    candidates = [Candidate(str(i), str(i), "Example Pharma", "Drug X", "example.com", 22) for i in range(3)]
+    calls = []
+
+    def enrich(candidate, max_pages, deadline):
+        calls.append(candidate.company_id)
+        record = SourceRecord(source_name="site", source_type="site", source_url=f"https://example.com/{candidate.company_id}",
+                              fetched_at=datetime.now(timezone.utc), company_name_raw=candidate.company_name,
+                              molecule_name_raw=candidate.molecule, signal_text="Drug X request for quotation impurity")
+        return [(record, 1)] * (max_pages + 3)
+
+    report = run_spike(candidates, enrich, max_pages=5, clock=lambda: 0.0)
+
+    assert calls == ["0"]
+    assert report["promoted"][0]["final_score"] >= 50
+    assert report["promoted"][0]["pages"] == 5
+
+
+def test_enrichment_uses_existing_weight_without_direct_bonus():
+    candidate = Candidate("c", "m", "Example Pharma", "Drug X", "example.com", 22)
+
+    def enrich(candidate, max_pages, deadline):
+        yield SourceRecord(source_name="site", source_type="site", source_url="https://example.com/method",
+                           fetched_at=datetime.now(timezone.utc), company_name_raw=candidate.company_name,
+                           molecule_name_raw=candidate.molecule, signal_text="Drug X analytical method validation"), 1
+
+    report = run_spike([candidate], enrich, max_pages=1, clock=lambda: 0.0)
+
+    assert report["investigated"][0]["final_score"] == 38
+    assert not report["promoted"]
