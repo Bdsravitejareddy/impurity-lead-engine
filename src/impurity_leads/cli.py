@@ -12,7 +12,6 @@ from impurity_leads.config import Settings, load_settings
 from impurity_leads.contacts.discovery import contact_candidate_urls
 from impurity_leads.contacts.models import RankedContact
 from impurity_leads.contacts.pipeline import enrich_opportunity_contacts
-from impurity_leads.crawling.client import create_crawl_client
 from impurity_leads.crawling.fetch import HttpFetcher
 from impurity_leads.crawling.robots import RobotsPolicy
 from impurity_leads.crawling.sitemap import extract_sitemap_urls
@@ -22,7 +21,6 @@ from impurity_leads.pipeline import process_records
 from impurity_leads.normalize import normalize_company_name
 from impurity_leads.seeds import load_company_seeds, relevant_candidate_urls
 from impurity_leads.storage.memory import MemoryLeadStore
-from impurity_leads.storage.supabase_store import create_supabase_store
 
 
 def seconds_remaining(start_monotonic: float, now_monotonic: float, deadline_minutes: int) -> float:
@@ -323,48 +321,10 @@ def run_fixture_smoke() -> int:
     return 0 if opportunities else 1
 
 
-def run_daily() -> int:
+def run_daily(workers: int | None = None, fresh: bool = False) -> int:
+    from impurity_leads.execution.daily import run_daily as execute_daily
     settings = load_settings()
-    started = time.monotonic()
-    deadline_monotonic = started + settings.run_deadline_minutes * 60.0
-    seed_path = _project_root() / "seeds" / "companies.csv"
-
-    if settings.supabase_url and settings.supabase_secret_key:
-        store = create_supabase_store(settings.supabase_url, settings.supabase_secret_key)
-    else:
-        store = MemoryLeadStore()
-
-    with create_crawl_client(timeout=settings.request_timeout_seconds) as client:
-        records = collect_daily_records(
-            client,
-            settings=settings,
-            seed_path=seed_path,
-            deadline_monotonic=deadline_monotonic,
-        )
-        opportunities = process_records(records, store)
-        contacts_by_opportunity = enrich_qualified_opportunities(
-            opportunities,
-            client=client,
-            settings=settings,
-            seed_path=seed_path,
-            store=store,
-            deadline_monotonic=deadline_monotonic,
-        )
-
-    date_label = datetime.now(timezone.utc).date().isoformat()
-    _export(
-        opportunities,
-        _project_root() / "exports",
-        f"opportunities-{date_label}",
-        contacts_by_opportunity,
-    )
-    remaining = seconds_remaining(started, time.monotonic(), settings.run_deadline_minutes)
-    print(
-        f"records={len(records)} opportunities={len(opportunities)} "
-        f"contacts={sum(len(items) for items in contacts_by_opportunity.values())} "
-        f"budget_remaining_seconds={remaining:.1f}"
-    )
-    return 0
+    return execute_daily(settings, _project_root(), workers=workers or settings.workers, fresh=fresh)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -374,7 +334,12 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser = subparsers.add_parser("export", help="export opportunity JSON to CSV and Excel")
     export_parser.add_argument("input", help="JSON file containing a list of opportunities")
     export_parser.add_argument("--output-dir", default="exports", help="directory for CSV/XLSX output")
-    subparsers.add_parser("run-daily", help="fetch structured public sources and score opportunities")
+    daily_parser = subparsers.add_parser("run-daily", help="resume or start a durable daily crawl")
+    daily_parser.add_argument("--workers", type=int, choices=range(1, 33), default=None, metavar="1-32")
+    daily_parser.add_argument("--fresh", action="store_true", help="start a new run without deleting history")
+    subparsers.add_parser("status", help="show latest durable run (read-only)")
+    export_run_parser = subparsers.add_parser("export-run", help="regenerate exports from a completed durable run")
+    export_run_parser.add_argument("run_id", nargs="?", default=None)
     return parser
 
 
@@ -385,7 +350,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "export":
         return run_export(args.input, args.output_dir)
     if args.command == "run-daily":
-        return run_daily()
+        return run_daily(workers=args.workers, fresh=args.fresh)
+    if args.command == "status":
+        from impurity_leads.execution.daily import status
+        return status(load_settings())
+    if args.command == "export-run":
+        from impurity_leads.execution.daily import export_run
+        return export_run(load_settings(), _project_root(), args.run_id)
     raise AssertionError(f"Unhandled command: {args.command}")
 
 

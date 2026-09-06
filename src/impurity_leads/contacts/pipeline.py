@@ -70,6 +70,19 @@ def enrich_opportunity_contacts(
         source_url = str(payload.get("_source_url") or "https://clinicaltrials.gov/")
         candidates.extend(extract_trial_contacts(payload, opportunity.company_name, source_url, now))
 
+    return enrich_contact_candidates(opportunity, company_domain, candidates, now)
+
+
+def enrich_contact_candidates(
+    opportunity: Opportunity,
+    company_domain: str,
+    candidates: list[ContactCandidate],
+    now: datetime | None = None,
+) -> list[RankedContact]:
+    """Rank checkpointed extracted candidates using the existing verification rules."""
+    if opportunity.priority not in {"HOT", "HIGH"}:
+        return []
+    now = now or datetime.now(timezone.utc)
     people = _merge_people(candidates)
     normalized_domain = company_domain.casefold().removeprefix("www.")
     named_emails = [

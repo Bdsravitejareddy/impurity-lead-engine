@@ -174,3 +174,16 @@ The suite covers:
 ## Current V1 boundary
 
 The backend now includes opportunity discovery/scoring plus verified-public/pattern-derived contact intelligence. The remaining product subsystem is the authenticated static dashboard (opportunity queue/detail/filter/export UI) after the backend schema and production crawl are approved.
+## Durable daily crawl
+
+Live runs require `SUPABASE_URL` and `SUPABASE_SECRET_KEY`; fixture commands remain offline. The default command resumes a compatible unfinished run no older than 48 hours:
+
+```bash
+python -m impurity_leads.cli run-daily
+python -m impurity_leads.cli run-daily --workers 6
+python -m impurity_leads.cli run-daily --fresh
+python -m impurity_leads.cli status
+python -m impurity_leads.cli export-run [RUN_ID]
+```
+
+Execution state is stored in `crawl_runs` and `crawl_tasks`. Workers claim tasks with expiring, fenced leases; retries are bounded to three total task attempts. The migration is additive and must be reviewed and explicitly approved before applying it to production. TTY runs show live progress through Rich; CI and redirected output use safe JSON lines.

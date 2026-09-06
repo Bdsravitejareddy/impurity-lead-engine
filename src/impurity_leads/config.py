@@ -1,21 +1,45 @@
 import os
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 
 class Settings(BaseModel):
     user_agent: str = "SVAK-Impurity-Lead-Research/0.1"
-    request_timeout_seconds: float = 20.0
-    per_domain_delay_seconds: float = 1.0
+    request_timeout_seconds: float = Field(default=20.0, gt=0)
+    per_domain_delay_seconds: float = Field(default=1.0, ge=0)
     max_retries: int = 2
-    run_deadline_minutes: int = 42
+    run_deadline_minutes: int = Field(default=42, ge=1)
+    workers: int = Field(default=6, ge=1, le=32)
+    connect_timeout_seconds: float = Field(default=5.0, gt=0)
+    task_timeout_seconds: float = Field(default=300.0, gt=0)
+    shutdown_drain_seconds: float = Field(default=30.0, ge=0)
+    lease_seconds: int = Field(default=120, ge=10)
+    heartbeat_seconds: float = Field(default=20.0, gt=0)
+    scheduler_poll_seconds: float = Field(default=0.2, gt=0)
+    retry_base_seconds: float = Field(default=5.0, ge=0)
+    retry_cap_seconds: float = Field(default=300.0, ge=0)
+    domain_cooldown_seconds: float = Field(default=300.0, ge=0)
+    outage_window_seconds: float = Field(default=60.0, gt=0)
+    outage_domain_threshold: int = Field(default=4, ge=2)
+    max_response_bytes: int = Field(default=8 * 1024 * 1024, gt=0)
     supabase_url: str | None = None
-    supabase_secret_key: str | None = None
+    supabase_secret_key: str | None = Field(default=None, repr=False)
+
+
+    @model_validator(mode='after')
+    def execution_budget(self):
+        if self.heartbeat_seconds >= self.lease_seconds / 2:
+            raise ValueError('heartbeat must be less than half the lease duration')
+        if self.shutdown_drain_seconds >= self.run_deadline_minutes * 60:
+            raise ValueError('drain must be shorter than invocation budget')
+        return self
 
 
 def load_settings() -> Settings:
-    return Settings(
-        user_agent=os.getenv("CRAWLER_USER_AGENT") or "SVAK-Impurity-Lead-Research/0.1",
-        supabase_url=os.getenv("SUPABASE_URL") or None,
-        supabase_secret_key=os.getenv("SUPABASE_SECRET_KEY") or None,
-    )
+    values = {}
+    for name in Settings.model_fields:
+        env_name = name.upper() if name.startswith('supabase_') else 'CRAWLER_' + name.upper()
+        value = os.getenv(env_name)
+        if value:
+            values[name] = value
+    return Settings.model_validate(values)
