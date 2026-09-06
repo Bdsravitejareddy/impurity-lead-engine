@@ -27,8 +27,16 @@ def load_company_seeds(path: str | Path) -> list[CompanySeed]:
         output: list[CompanySeed] = []
         for row in rows:
             company_name = (row.get("company_name") or "").strip()
-            domain = _normalize_domain(row.get("domain") or "")
-            molecules = [item.strip() for item in (row.get("molecules") or "").split(";") if item.strip()]
+            domain_raw = (row.get("domain") or "").strip()
+            molecules_raw = (row.get("molecules") or "").strip()
+            domain = _normalize_domain(domain_raw)
+            # A repeated CSV header is data to DictReader, so reject it before
+            # normalizing ("domain" would otherwise become a valid hostname).
+            if (company_name.casefold() == "company_name"
+                    and domain == "domain"
+                    and molecules_raw.casefold() == "molecules"):
+                continue
+            molecules = [item.strip() for item in molecules_raw.split(";") if item.strip()]
             if company_name and domain:
                 output.append(CompanySeed(company_name=company_name, domain=domain, molecules=molecules))
         return output

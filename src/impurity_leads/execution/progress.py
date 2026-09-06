@@ -150,7 +150,9 @@ class Reporter:
         snapshot = summarize(run, tasks)
         # Run metrics are authoritative when present; event metrics fill only missing counts.
         with self._lock:
-            snapshot = {**self._metrics, **snapshot, "workers_total": self.workers, "event": "progress"}
+            configured_workers = (run.get("config_json") or {}).get("workers")
+            workers_total = configured_workers if isinstance(configured_workers, int) and configured_workers > 0 else self.workers
+            snapshot = {**self._metrics, **snapshot, "workers_total": workers_total, "event": "progress"}
             for field in ("run_id", "status", "current_stage"):
                 snapshot[field] = _label(snapshot.get(field), token=True)
             if self._live is None:
@@ -160,7 +162,7 @@ class Reporter:
                 suffix = " (provisional)" if snapshot["provisional"] else ""
                 lines = [f"Run {snapshot['run_id']} | {snapshot['status']} | {snapshot['current_stage']}",
                          f"Progress {snapshot['settled']}/{snapshot['total']} ({snapshot['progress_percentage']:.1f}%){suffix}",
-                         f"Workers {snapshot['workers_active']}/{self.workers} | elapsed {snapshot['elapsed_seconds']:.0f}s",
+                         f"Workers {snapshot['workers_active']}/{workers_total} | elapsed {snapshot['elapsed_seconds']:.0f}s",
                          " | ".join(f"{state}: {snapshot[state]}" for state in STATES),
                          " | ".join(f"{field}: {snapshot[field]}" for field in sorted(COUNTS) if field in snapshot)]
                 if eta is not None:

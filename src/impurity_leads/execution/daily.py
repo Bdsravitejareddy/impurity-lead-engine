@@ -182,7 +182,7 @@ def run_daily(settings,root,*,workers=6,fresh=False):
         safe=settings.model_dump(exclude={'supabase_url','supabase_secret_key','workers'})
         material={'settings':safe,'seeds':[asdict(s) for s in seeds],'sources':['clinical_trials','fda','company_site','common_crawl'],
                   'schema_version':VERSION,'behavior_version':behavior_version()}
-        run=store.begin(fingerprint(material),str(uuid4()),fresh,{'schema_version':VERSION,'seed_count':len(seeds),'planning_complete':False})
+        run=store.begin(fingerprint(material),str(uuid4()),fresh,{'schema_version':VERSION,'seed_count':len(seeds),'workers':workers,'planning_complete':False})
         reporter.emit({'event':'run_resumed' if run.get('resumed') else 'run_started','run_id':run['id'],'status':'running'})
         if run.get('resumed'):
             reporter.render(run,store.snapshot())

@@ -75,6 +75,16 @@ def test_non_tty_snapshot_is_json_and_merges_safe_output_metrics():
     assert result["workers_total"] == 6
 
 
+def test_snapshot_reports_workers_persisted_for_the_run():
+    stream = io.StringIO()
+    reporter = Reporter(stream=stream, workers=6)
+    reporter.render(run(config_json={"planning_complete": True, "workers": 1}), [])
+
+    result = json.loads(stream.getvalue().splitlines()[-1])
+
+    assert result["workers_total"] == 1
+
+
 def test_tty_rich_lifecycle_and_ci_fallback(monkeypatch):
     class TTY(io.StringIO):
         def isatty(self):
