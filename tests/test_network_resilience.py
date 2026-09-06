@@ -91,12 +91,12 @@ def test_owned_crawler_clients_ignore_environment_cert_settings(monkeypatch, fac
 
 
 def test_daily_client_ignores_environment_cert_settings(monkeypatch, tmp_path):
+    # Live daily now requires Supabase; exercise its network client directly.
+    from impurity_leads.execution.http import CrawlClient, HostGate
+
     monkeypatch.setenv("SSL_CERT_FILE", "/nonexistent/crawler-test.pem")
-    monkeypatch.setattr(cli, "load_settings", lambda: Settings())
-    monkeypatch.setattr(cli, "_project_root", lambda: tmp_path)
-    monkeypatch.setattr(cli, "collect_daily_records", lambda *a, **kw: [])
-    monkeypatch.setattr(cli, "_export", lambda *a, **kw: None)
-    assert cli.run_daily() == 0
+    with CrawlClient(None, Settings(), HostGate()) as client:
+        assert client.client is not None
 
 
 def test_owned_client_blocks_https_to_http_redirect_before_request(monkeypatch):

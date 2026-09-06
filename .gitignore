@@ -9,3 +9,5 @@ __pycache__/
 exports/
 
 seeds/companies.csv
+
+supabase/.temp/
