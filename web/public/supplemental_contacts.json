@@ -1,0 +1,92 @@
+[
+  {
+    "company": "AMNEAL PHARMS",
+    "domain": "amneal.com",
+    "contacts": [
+      {
+        "name": "Sanjay Kumar Jain",
+        "title": "Chief Quality Officer",
+        "function": "Global Quality / Validation / Regulatory Audits",
+        "email": null,
+        "email_status": "ROLE_ONLY",
+        "mailbox_verified": false,
+        "phone": null,
+        "phone_status": "ROLE_ONLY",
+        "profile_url": "https://amneal.com/about/our-leadership/",
+        "role_fit_score": 70,
+        "status_confidence": "HIGH",
+        "evidence_urls": [
+          "https://amneal.com/about/our-leadership/",
+          "https://people.equilar.com/bio/person/sanjay-jain-amneal-pharmaceuticals-inc/28901645"
+        ],
+        "why": "Global quality, validation, API-vendor and regulatory-audit remit aligns with sucralfate quality/impurity evidence.",
+        "recommended_channel": "LinkedIn/profile or Amneal corporate contact form",
+        "current_status": "CURRENT_VERIFIED"
+      },
+      {
+        "name": "Dhananjay Dwivedi",
+        "title": "Vice President, Analytical Development",
+        "function": "Analytical Development",
+        "email": null,
+        "email_status": "ROLE_ONLY",
+        "mailbox_verified": false,
+        "phone": null,
+        "phone_status": "ROLE_ONLY",
+        "profile_url": null,
+        "role_fit_score": 85,
+        "status_confidence": "MEDIUM",
+        "evidence_urls": [
+          "https://in.linkedin.com/in/pardeep-k-sharma-4343b816"
+        ],
+        "why": "Historical/public conference seed; exact current identity and title could not be independently verified.",
+        "recommended_channel": "Do not contact until current identity is verified.",
+        "current_status": "UNKNOWN"
+      },
+      {
+        "name": "Gaurang Darji",
+        "title": "Analytical Development professional, Amneal Pharmaceuticals",
+        "function": "Analytical Development",
+        "email": null,
+        "email_status": "ROLE_ONLY",
+        "mailbox_verified": false,
+        "phone": null,
+        "phone_status": "ROLE_ONLY",
+        "profile_url": "https://in.linkedin.com/in/gaurang-darji-742a65146",
+        "role_fit_score": 75,
+        "status_confidence": "MEDIUM",
+        "evidence_urls": [
+          "https://in.linkedin.com/in/gaurang-darji-742a65146"
+        ],
+        "why": "Public profile states extensive Analytical Development Lab experience and current Amneal affiliation; exact seniority is not stated.",
+        "recommended_channel": "LinkedIn",
+        "current_status": "PROFESSIONAL_PROFILE"
+      }
+    ]
+  },
+  {
+    "company": "JUBILANT GENERICS",
+    "domain": "jubl.com",
+    "contacts": [
+      {
+        "name": "Varun Jha",
+        "title": "Head Of Quality Assurance",
+        "function": "Quality Assurance",
+        "email": null,
+        "email_status": "ROLE_ONLY",
+        "mailbox_verified": false,
+        "phone": null,
+        "phone_status": "ROLE_ONLY",
+        "profile_url": "https://theorg.com/org/jubilant-generics-limited/org-chart/varun-jha",
+        "role_fit_score": 80,
+        "status_confidence": "MEDIUM-HIGH",
+        "evidence_urls": [
+          "https://theorg.com/org/jubilant-generics-limited/org-chart/varun-jha",
+          "https://www.jubilantgenerics.com/research-and-development"
+        ],
+        "why": "Current Jubilant Generics QA leader with long tenure; relevant to risperidone analytical-method and validation context.",
+        "recommended_channel": "Professional profile or Jubilant Generics corporate route",
+        "current_status": "PROFESSIONAL_PROFILE"
+      }
+    ]
+  }
+]

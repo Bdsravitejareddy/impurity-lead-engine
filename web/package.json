@@ -1,0 +1,1 @@
+{"name":"svak-intelligence","private":true,"version":"1.0.0","type":"module","scripts":{"dev":"vite","build":"vite build","test":"vitest run"},"dependencies":{"@supabase/supabase-js":"^2.115.0","@vitejs/plugin-react":"latest","jsdom":"latest","lucide-react":"latest","react":"latest","react-dom":"latest","typescript":"latest","vite":"latest","vitest":"latest"}}

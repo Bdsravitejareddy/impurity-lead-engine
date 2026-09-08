@@ -1,0 +1,1166 @@
+{
+  "metrics": {
+    "fresh_candidates_tested": 20,
+    "technical_corroboration": 2,
+    "qualified_ge_50": 2,
+    "review": 1,
+    "high": 0,
+    "hot": 1,
+    "promotion_rate": 0.1,
+    "named_contact_rate": 0.1,
+    "contactable_rate": 0.0,
+    "average_requests": 1.7,
+    "average_runtime_seconds": 5.004
+  },
+  "leads": [
+    {
+      "account": {
+        "company": "AMNEAL PHARMS",
+        "domain": "amneal.com",
+        "buyer_type": "pharmaceutical manufacturer/developer"
+      },
+      "opportunity": {
+        "molecule": "SUCRALFATE",
+        "regulatory_application": "ANDA209356",
+        "score": 100,
+        "priority": "HOT",
+        "technical_relevance": "FDA quality assessment explicitly covers reference standard, stability study and elemental impurities",
+        "urgency_bonus": 0,
+        "confidence": "high"
+      },
+      "evidence": [
+        {
+          "title": "ANDA 209356 quality assessment",
+          "url": "https://www.accessdata.fda.gov/drugsatfda_docs/nda/2019/209356Orig1s000.pdf",
+          "source": "FDA",
+          "date": "2019-12-02",
+          "company_linkage": "Amneal Pharmaceuticals applicant; normalized to production Amneal Pharms",
+          "molecule_linkage": "sucralfate",
+          "technical_context": "reference standard review, stability study, elemental impurities",
+          "acceptance": "accepted through normal SourceRecord/classifier/fingerprint/MemoryLeadStore/scorer"
+        }
+      ],
+      "why_svak": {
+        "likely_service_requirement": "impurity/reference-standard and stability analytical support",
+        "why_now": "FDA quality review documents molecule-specific quality controls; current purchasing need is unknown"
+      },
+      "contacts": [
+        {
+          "name": "Sanjay Kumar Jain",
+          "title": "Chief Quality Officer",
+          "function": "quality",
+          "profile_url": "https://amneal.com/about/our-leadership/",
+          "role_fit_score": 70,
+          "email": null,
+          "email_status": "ROLE_ONLY",
+          "mailbox_verified": false,
+          "phone": null,
+          "phone_status": "ROLE_ONLY",
+          "confidence": 0.9,
+          "evidence_urls": [
+            "https://amneal.com/about/our-leadership/",
+            "https://amneal.com/about/our-leadership/"
+          ]
+        }
+      ],
+      "person_intelligence": {
+        "observed": [
+          "Sanjay Kumar Jain is listed by Amneal as Chief Quality Officer; official biography states oversight of global quality operations and validation/regulatory audits."
+        ],
+        "inferred": [
+          "Likely JTBD include maintaining quality controls and resolving analytical impurity/stability findings."
+        ],
+        "unknown": [
+          "Whether Amneal currently needs external sucralfate impurity synthesis."
+        ]
+      },
+      "outreach": {
+        "personalization_hook": "Amneal\u2019s FDA sucralfate quality review documents reference-standard and stability controls.",
+        "opening": "I saw the Amneal sucralfate quality work covering reference standards and stability controls.",
+        "discovery_question": "Are there current or upcoming sucralfate impurity or reference-standard requirements where an external synthesis partner could help?",
+        "svak_value_hypothesis": "SVAK can provide difficult impurity synthesis and characterized reference standards.",
+        "do_not_claim": "Do not claim an active requirement."
+      }
+    },
+    {
+      "account": {
+        "company": "JUBILANT GENERICS",
+        "domain": "jubl.com",
+        "buyer_type": "pharmaceutical manufacturer/developer (current Jubilant Generics identity resolved)"
+      },
+      "opportunity": {
+        "molecule": "RISPERIDONE",
+        "regulatory_application": "ANDA090839",
+        "score": 56,
+        "priority": "REVIEW",
+        "technical_relevance": "UPLC-MS/MS analytical method development and validation for risperidone; analyte supplied by Jubilant Life Sciences; corporate identity resolution to Jubilant Generics is medium confidence.",
+        "urgency_bonus": 0
+      },
+      "evidence": [
+        {
+          "title": "Systematic development of a UPLC-MS/MS method for risperidone",
+          "url": "https://www.sciencedirect.com/science/article/abs/pii/S157002322031309X",
+          "source": "public publication",
+          "date": "2020-12-01",
+          "technical_context": "Risperidone method development/validation; risperidone and metabolites provided by Jubilant Life Sciences.",
+          "signal_types": [
+            "method_validation",
+            "stability"
+          ],
+          "score_contributions": {
+            "method_validation": 12,
+            "stability": 18
+          },
+          "confidence": "medium"
+        },
+        {
+          "title": "Jubilant Generics company profile",
+          "url": "https://www.jubilantgenerics.com/about-us/company-profile",
+          "source": "company",
+          "date": null,
+          "technical_context": "Jubilant Generics corporate identity/subsidiary context."
+        }
+      ],
+      "why_svak": {
+        "likely_need": "External impurity/reference-standard and analytical support for risperidone method and related-substance work (inferred).",
+        "why_now": "No recent urgency event established; historical technical relevance only.",
+        "unknown": "Current purchasing requirement unknown."
+      },
+      "contacts": [
+        {
+          "name": "Varun Jha",
+          "title": "Head Of Quality Assurance",
+          "function": "quality",
+          "profile_url": "https://theorg.com/org/jubilant-generics-limited/org-chart/varun-jha",
+          "role_fit_score": 80,
+          "email": null,
+          "email_status": "ROLE_ONLY",
+          "mailbox_verified": false,
+          "phone": null,
+          "phone_status": "ROLE_ONLY",
+          "confidence": 0.75,
+          "evidence_urls": [
+            "https://theorg.com/org/jubilant-generics-limited/org-chart/varun-jha"
+          ]
+        }
+      ],
+      "person_intelligence": {
+        "observed": [
+          "Varun Jha is listed as Head Of Quality Assurance at Jubilant Generics Limited."
+        ],
+        "inferred": [
+          "Likely JTBD include QA oversight of analytical/stability investigations and regulatory readiness."
+        ],
+        "unknown": [
+          "Whether a current risperidone impurity requirement exists."
+        ],
+        "professional_themes": [
+          "Quality assurance and compliance (role-derived; person-specific public content not found)."
+        ]
+      },
+      "outreach": {
+        "personalization_hook": "Risperidone method-validation work associated with Jubilant Life Sciences.",
+        "opening": "I saw the published risperidone analytical-method work associated with Jubilant Life Sciences and your quality-assurance role. SVAK supports custom impurity synthesis and reference standards; are there any current or upcoming risperidone analytical requirements where an external partner could help?",
+        "discovery_question": "Are related-substance, degradation-product, or validation-standard gaps creating delays for risperidone work?",
+        "value_hypothesis": "SVAK may reduce turnaround for difficult low-volume impurity/reference-standard needs (inferred).",
+        "do_not_claim": "Do not claim an active requirement or purchasing intent."
+      }
+    }
+  ],
+  "candidates": [
+    {
+      "company": "PF PRISM CV",
+      "molecule": "SIROLIMUS",
+      "domain": "pfizer.com",
+      "application": "NDA021110",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 2,
+      "requests": 2,
+      "elapsed_seconds": 25.045,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 2
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "KNOA PHARMA",
+      "molecule": "NALMEFENE HYDROCHLORIDE",
+      "domain": "knoapharma.com",
+      "application": "NDA218590",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 2,
+      "requests": 2,
+      "elapsed_seconds": 2.533,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 2
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "MICRO LABS",
+      "molecule": "DOXEPIN HYDROCHLORIDE",
+      "domain": "microlabsusa.com",
+      "application": "ANDA217688",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 1,
+      "requests": 1,
+      "elapsed_seconds": 4.448,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 1
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "NOVUGEN",
+      "molecule": "LENALIDOMIDE",
+      "domain": "novugen.com",
+      "application": "ANDA217281",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 1,
+      "requests": 1,
+      "elapsed_seconds": 2.896,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 1
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "INGENUS PHARMS",
+      "molecule": "ISOSORBIDE DINITRATE",
+      "domain": "ingenuspharma.com",
+      "application": "ANDA215586",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 1,
+      "requests": 1,
+      "elapsed_seconds": 7.157,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 1
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "HIKMA",
+      "molecule": "SUCCINYLCHOLINE CHLORIDE",
+      "domain": "hikma.com",
+      "application": "NDA215143",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 3,
+      "requests": 3,
+      "elapsed_seconds": 6.03,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 3
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "RITEDOSE",
+      "molecule": "ARFORMOTEROL TARTRATE",
+      "domain": "ritedose.com",
+      "application": "ANDA214736",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 1,
+      "requests": 1,
+      "elapsed_seconds": 3.645,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 1
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "AMNEAL PHARMS",
+      "molecule": "SUCRALFATE",
+      "domain": "amneal.com",
+      "application": "ANDA209356",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 100,
+      "priority": "HOT",
+      "technical_evidence_found": true,
+      "accepted_signal_types": [
+        "reference_standard",
+        "stability"
+      ],
+      "signal_contributions": [
+        {
+          "signal_type": "regulatory_application",
+          "source_type": "fda",
+          "base_weight": 22,
+          "confidence": 1.0,
+          "event_date": null,
+          "age_days": null,
+          "freshness_adjustment": 0,
+          "other_modifiers": 0,
+          "effective_contribution": 22
+        },
+        {
+          "signal_type": "reference_standard",
+          "source_type": "fda",
+          "base_weight": 60,
+          "confidence": 1.0,
+          "event_date": "2019-12-02T00:00:00+00:00",
+          "age_days": 2470,
+          "freshness_adjustment": 0,
+          "other_modifiers": 0,
+          "effective_contribution": 60
+        },
+        {
+          "signal_type": "stability",
+          "source_type": "fda",
+          "base_weight": 18,
+          "confidence": 1.0,
+          "event_date": "2019-12-02T00:00:00+00:00",
+          "age_days": 2470,
+          "freshness_adjustment": 0,
+          "other_modifiers": 0,
+          "effective_contribution": 18
+        }
+      ],
+      "named_contacts": 1,
+      "contactable_contacts": 0,
+      "pages": 1,
+      "requests": 1,
+      "elapsed_seconds": 3.18,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 1
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "none; public FDA quality assessment",
+      "evidence": [
+        {
+          "title": "ANDA 209356 quality assessment",
+          "url": "https://www.accessdata.fda.gov/drugsatfda_docs/nda/2019/209356Orig1s000.pdf",
+          "source": "FDA",
+          "date": "2019-12-02",
+          "company_linkage": "Amneal Pharmaceuticals applicant; normalized to production Amneal Pharms",
+          "molecule_linkage": "sucralfate",
+          "technical_context": "reference standard review, stability study, elemental impurities",
+          "acceptance": "accepted through normal SourceRecord/classifier/fingerprint/MemoryLeadStore/scorer"
+        }
+      ],
+      "validation_mode": "PUBLIC_RESEARCH_VALIDATION + AUTOMATED_BASELINE"
+    },
+    {
+      "company": "HETERO LABS LTD V",
+      "molecule": "COLCHICINE",
+      "domain": "heterodrugs.com",
+      "application": "ANDA208993",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 1,
+      "requests": 1,
+      "elapsed_seconds": 4.909,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 1
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "ALKEM LABS LTD",
+      "molecule": "RABEPRAZOLE SODIUM",
+      "domain": "alkemlabs.com",
+      "application": "ANDA208644",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 1,
+      "requests": 1,
+      "elapsed_seconds": 2.005,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 1
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "AUROBINDO PHARMA LTD",
+      "molecule": "MIDODRINE HYDROCHLORIDE",
+      "domain": "aurobindo.com",
+      "application": "ANDA212774",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 1,
+      "requests": 1,
+      "elapsed_seconds": 2.496,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 1
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "QUAGEN",
+      "molecule": "CYPROHEPTADINE HYDROCHLORIDE",
+      "domain": "quagenpharma.com",
+      "application": "ANDA212423",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 2,
+      "requests": 2,
+      "elapsed_seconds": 4.485,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 2
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "TORRENT",
+      "molecule": "TADALAFIL",
+      "domain": "torrentpharma.com",
+      "application": "ANDA212062",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 1,
+      "requests": 1,
+      "elapsed_seconds": 3.222,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 1
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "NOVARTIS",
+      "molecule": "SULFACETAMIDE SODIUM",
+      "domain": "novartis.com",
+      "application": "NDA018988",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 2,
+      "requests": 2,
+      "elapsed_seconds": 3.592,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 2
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "JUBILANT GENERICS",
+      "molecule": "RISPERIDONE",
+      "domain": "jubl.com",
+      "application": "ANDA090839",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 56,
+      "priority": "REVIEW",
+      "technical_evidence_found": true,
+      "accepted_signal_types": [
+        "method_validation",
+        "stability"
+      ],
+      "signal_contributions": [
+        {
+          "signal_type": "regulatory_application",
+          "source_type": "fda",
+          "base_weight": 22,
+          "confidence": 1.0,
+          "event_date": null,
+          "age_days": null,
+          "freshness_adjustment": 0,
+          "other_modifiers": 0,
+          "effective_contribution": 22
+        },
+        {
+          "signal_type": "stability",
+          "source_type": "publication",
+          "base_weight": 18,
+          "confidence": 1.0,
+          "event_date": "2020-12-01T00:00:00+00:00",
+          "age_days": 2105,
+          "freshness_adjustment": 0,
+          "other_modifiers": 0,
+          "effective_contribution": 18
+        },
+        {
+          "signal_type": "method_validation",
+          "source_type": "publication",
+          "base_weight": 12,
+          "confidence": 1.0,
+          "event_date": "2020-12-01T00:00:00+00:00",
+          "age_days": 2105,
+          "freshness_adjustment": 0,
+          "other_modifiers": 0,
+          "effective_contribution": 12
+        }
+      ],
+      "named_contacts": 1,
+      "contactable_contacts": 0,
+      "pages": 1,
+      "requests": 1,
+      "elapsed_seconds": 2.407,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 1
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "none; supplemental public research validation",
+      "evidence": [
+        {
+          "title": "Systematic development of a bioanalytical UPLC-MS/MS method for estimation of risperidone",
+          "url": "https://www.sciencedirect.com/science/article/abs/pii/S157002322031309X",
+          "source": "ScienceDirect",
+          "date": "2020-12-01",
+          "company_linkage": "Jubilant Generics identity resolved to Jubilant Life Sciences group",
+          "molecule_linkage": "risperidone",
+          "technical_context": "stability-indicating method and bioanalytical method validation",
+          "acceptance": "accepted through SourceRecord/classifier/fingerprint/MemoryLeadStore/scorer"
+        }
+      ],
+      "validation_mode": "PUBLIC_RESEARCH_VALIDATION + AUTOMATED_BASELINE",
+      "contact_details": [
+        {
+          "name": "Varun Jha",
+          "title": "Head Of Quality Assurance",
+          "function": "quality",
+          "profile_url": "https://theorg.com/org/jubilant-generics-limited/org-chart/varun-jha",
+          "email": null,
+          "email_status": "ROLE_ONLY",
+          "mailbox_verified": false,
+          "phone": null,
+          "phone_status": "ROLE_ONLY",
+          "role_fit_score": 80,
+          "confidence": 0.75,
+          "evidence_urls": [
+            "https://theorg.com/org/jubilant-generics-limited/org-chart/varun-jha"
+          ]
+        }
+      ]
+    },
+    {
+      "company": "B BRAUN",
+      "molecule": "METRONIDAZOLE",
+      "domain": "bbraun.com",
+      "application": "NDA018900",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 1,
+      "requests": 1,
+      "elapsed_seconds": 5.728,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 1
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "APOTEX",
+      "molecule": "PAROXETINE HYDROCHLORIDE",
+      "domain": "apotex.com",
+      "application": "ANDA077395",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 6,
+      "requests": 6,
+      "elapsed_seconds": 2.889,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 6
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "GLENMARK PHARMS LTD",
+      "molecule": "MOMETASONE FUROATE",
+      "domain": "glenmarkpharma.com",
+      "application": "ANDA090506",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 1,
+      "requests": 1,
+      "elapsed_seconds": 3.512,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 1
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "SANDOZ",
+      "molecule": "PERPHENAZINE",
+      "domain": "sandoz.com",
+      "application": "ANDA089686",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 4,
+      "requests": 4,
+      "elapsed_seconds": 3.407,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 4
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    },
+    {
+      "company": "PADAGIS ISRAEL",
+      "molecule": "FLURANDRENOLIDE",
+      "domain": "padagis.com",
+      "application": "ANDA207133",
+      "initial_score": 22,
+      "latest_activity_date": null,
+      "final_score": 22,
+      "priority": null,
+      "technical_evidence_found": false,
+      "accepted_signal_types": [],
+      "signal_contributions": [],
+      "named_contacts": 0,
+      "contactable_contacts": 0,
+      "pages": 1,
+      "requests": 1,
+      "elapsed_seconds": 6.494,
+      "source_status": {
+        "company_site": {
+          "attempted": true,
+          "status": "failed",
+          "records": 0,
+          "error": "transport"
+        },
+        "europe_pmc": {
+          "attempted": true,
+          "status": "no_match",
+          "records": 0
+        },
+        "fda": {
+          "attempted": true,
+          "status": "records",
+          "records": 1
+        },
+        "regulatory": {
+          "attempted": false,
+          "status": "not_configured",
+          "records": 0
+        }
+      },
+      "dominant_failure": "company_site_transport; europe_pmc_no_match; FDA baseline only",
+      "evidence": [],
+      "validation_mode": "AUTOMATED_CRAWLER_VALIDATION"
+    }
+  ]
+}
