@@ -127,3 +127,21 @@ The next safe step is to run an authenticated browser acceptance pass against `h
 - Zero-source Keisuke Inoue/Takeda verification: 0 contact sources and 0 verified claims; UI now renders `UNRESEARCHED` and suppresses person-level summary/JTBD.
 - Vijayasarathi remains the researched acceptance profile; the summary is generated from role, claims, positions, works, problems, themes and JTBD rather than UI implementation text.
 - `Refresh research` currently creates a durable `QUEUED` row and displays the latest run metrics. A backend worker that consumes this queue and performs person-level web research is still a remaining integration task; the existing daily crawler does not yet consume `contact_research_runs`.
+
+## Source-driven contact enrichment update
+
+- Added source states `DISCOVERED`, `QUEUED`, `FETCHING`, `INSPECTED`, `USED`, `REJECTED`, `BLOCKED_AUTH`, `FAILED`, and `PENDING_REVIEW`.
+- Added source raw-content/extraction metadata and expanded research-run metrics.
+- Add Source now accepts public URLs, pasted profile text, and TXT/Markdown/PDF file input. Public fetch failures for LinkedIn are recorded as `BLOCKED_AUTH`, never silently rejected.
+- Supplied profile text is parsed into observed claims, positions, education, works, themes and bounded research keywords/queries; persisted records remain source-linked.
+- Latest frontend tests: 25 passed; build passed. Latest production bundle: `assets/index-BRUkMYBC.js`, HTTP 200.
+- The queue currently persists ingestion and research-run lifecycle data. Full autonomous supplementary web-search worker remains a later backend task.
+
+## Manual profile ingestion update (2026-09-09)
+
+- Add Source is now a visible workflow with source type, optional original URL, pasted profile text, and document upload.
+- Submitted professional content is stored with raw content, source kind, description, content hash, extraction JSON and processing status.
+- Profile facts are persisted as source-linked observed claims/positions/education/works/themes; generated queries are recorded in the research run.
+- LinkedIn/public-profile fetch failures use `BLOCKED_AUTH`; `INSPECTED` is no longer the final disposition for processed supplied sources.
+- Source register shows extraction counts and supports filtering blocked/pending/used/rejected states.
+- Latest production deployment: `https://98f0b4ec.svak-intelligence.pages.dev`; alias `https://svak-intelligence.pages.dev`.
