@@ -109,3 +109,21 @@ For Vijayasarathi, sources include a public professional biography, Cipla’s of
 ## Current task
 
 The next safe step is to run an authenticated browser acceptance pass against `https://svak-intelligence.pages.dev`: open Vijayasarathi’s Contact 360, edit a title, add a note, refresh, sign out/in, and verify the records remain. Then enrich additional current contacts using the same normalized model and source/provenance rules.
+
+## 2026-09-08 Contact 360 completeness update
+
+- Added category-based research completeness calculation across identity, employment, career, education, person work, organisational work, problems, themes, activity, contactability, JTBD and source diversity.
+- Added states `UNRESEARCHED`, `PARTIAL`, `RESEARCHED`, and `DEEP PROFILE`; role fit remains separate.
+- Zero-source/zero-claim contacts now receive an explicit unresearched state and no generic person-level summary or JTBD.
+- Executive summaries now use only person/account intelligence and omit implementation boilerplate.
+- Source counters are clickable and filter the source register by inspected/used/rejected status.
+- Latest research-run metrics are shown when available.
+- Frontend tests: 23 passed; backend: 218 passed; integration: 14 passed; build and diff check passed.
+- Current deployment after this update: `https://6d409199.svak-intelligence.pages.dev`; production alias remains `https://svak-intelligence.pages.dev`.
+
+## Follow-up implementation status
+
+- Latest completeness commit: `8e8c69d feat: enforce contact research completeness`.
+- Zero-source Keisuke Inoue/Takeda verification: 0 contact sources and 0 verified claims; UI now renders `UNRESEARCHED` and suppresses person-level summary/JTBD.
+- Vijayasarathi remains the researched acceptance profile; the summary is generated from role, claims, positions, works, problems, themes and JTBD rather than UI implementation text.
+- `Refresh research` currently creates a durable `QUEUED` row and displays the latest run metrics. A backend worker that consumes this queue and performs person-level web research is still a remaining integration task; the existing daily crawler does not yet consume `contact_research_runs`.
