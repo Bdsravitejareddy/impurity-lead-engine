@@ -1,0 +1,111 @@
+# SVAK Intelligence Project Handoff
+
+Updated: 2026-09-08
+
+## Current architecture
+
+- Backend: Python deterministic extraction, classification, scoring and resumable crawler.
+- Database: Supabase project `kifakogrfdlezwloovpv` (Ravi Project, Sydney region).
+- Frontend: React + TypeScript + Vite in `web/`.
+- Frontend data path: authenticated Supabase adapter first; sanitized JSON fallback at `web/public/data.json` when Supabase is unavailable.
+- Hosting: Cloudflare Pages project `svak-intelligence`.
+- Scheduled/backend execution: existing GitHub Actions crawler workflow and Supabase-backed crawler tables.
+- Browser-safe credentials: only `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`; service credentials remain backend-only.
+
+## Production URLs
+
+- Website: https://svak-intelligence.pages.dev
+- Supabase API: https://kifakogrfdlezwloovpv.supabase.co
+- Supabase OAuth callback: https://kifakogrfdlezwloovpv.supabase.co/auth/v1/callback
+
+## Repository state
+
+- Branch/worktree: `spike/enrichment-feasibility` in `/Users/raviteja/impurity-lead-engine`.
+- Latest meaningful commit: `ae55f68` (`feat: expand contact intelligence workspace`).
+- Latest Cloudflare deployment URL/hash: `https://27c7fb50.svak-intelligence.pages.dev`.
+- The working tree also contains earlier spike/scoring changes and generated research artifacts that predate the Contact 360 commit. They remain visible in `git status` and were intentionally not reset or deleted.
+
+## Production data counts
+
+Read-only Supabase verification on 2026-09-08:
+
+- Qualified opportunities (`score >= 50`): 63
+- Unique qualified companies: 39
+- Contacts: 29
+- HOT: 45
+- HIGH: 9
+- REVIEW: 9
+- Contact sources: 4
+- Career positions: 3
+- JTBD records: 2
+
+The seeded gold-standard Contact 360 profile is Vijayasarathi Ramaswami at Cipla Limited.
+
+## Scoring methodology
+
+The score represents outbound commercial relevance, not purchase probability. Historical positive technical evidence remains useful and never becomes negative because of age. Base signals include direct impurity RFQ, reference standards, nitrosamine/NDSRI, genotoxic impurity, impurity characterization, degradation products, stability, method validation and regulatory application. Recency is a separate one-time urgency bonus: 0–180 days +15, 181–365 +8, 366–730 +3, older or unknown +0. Duplicate/mirrored evidence must not create artificial diversity. Priority thresholds remain REVIEW >=50, HIGH >=65 and HOT >=80. Vendor exclusion and direct-RFQ semantics remain unchanged.
+
+## Contact-status rules and stale-contact safeguard
+
+- `VERIFIED_PUBLIC`: exact professional mailbox or business phone publicly observed for that person.
+- `PATTERN_CONFIRMED`: current person plus a company email convention established from at least two distinct named public employee emails; inferred mailbox is never verified.
+- `ROLE_ONLY`: relevant current person identified without an acceptable direct route.
+- `STALE`: historical or no-longer-current affiliation.
+- `PROFESSIONAL`: current/public professional profile is available and useful even without email.
+- `UNKNOWN`: current status cannot be independently established.
+
+Historical publication authors are research seeds only. Current role, company and function must be independently verified before being presented as current contacts. Old authors are downgraded or replaced when current evidence is unavailable.
+
+## Contact 360 requirements and implementation
+
+`/contacts/:contactId` is a persistent workspace with tabs for Overview, Career, Work & Research, Problems, JTBD, Opportunities, Sources, Notes & Manual Intel, and History. It displays source coverage, current-role confidence, person/company attribution, claim provenance, career positions, education, person-direct work, organisational work, problems, professional themes, JTBD hypotheses, related opportunities, and outreach preparation. Missing information is shown as unknown rather than invented.
+
+The current implementation uses normalized Supabase tables:
+
+- `contact_sources`
+- `contact_positions`
+- `contact_education`
+- `contact_works`
+- `contact_problems`
+- `contact_themes`
+- `contact_jtbd`
+- `contact_claims`
+- `contact_notes`
+- `contact_history`
+- `contact_conflicts`
+- `contact_research_runs`
+
+The additive migration is `supabase/migrations/20260908120000_contact_intelligence_workspace.sql`. RLS is enabled on all new tables; anonymous access is revoked and authenticated access is permitted. Backend crawler tables remain protected.
+
+## Manual intelligence requirements
+
+Users can edit a current title, add JTBD intelligence, add internal notes, submit a public source URL, and queue a research refresh. Manual records are stored in Supabase and are separate from public observations. Profile edits create `contact_history` records. `contact_conflicts` is available for manual-versus-automated review so automation does not silently overwrite human intelligence.
+
+Manual entries should carry creator, timestamps, visibility, confidence, source description and related opportunity context. UI badges distinguish `PUBLIC · OBSERVED`, `AI · INFERRED`, `MANUAL`, and `UNKNOWN`.
+
+## Source/provenance model
+
+Sources are canonical per contact and URL, with source type, publisher, source date, access date, status (`USED`, `INSPECTED`, `REJECTED`), evidence strength, claims, and reasons used/not used. Claims, positions, works, problems and JTBD store source UUIDs. Work attribution is explicitly `PERSON_DIRECT`, `COMPANY_CONTEXT` or `OPPORTUNITY_CONTEXT`; organisational evidence is never presented as the individual’s personal work.
+
+For Vijayasarathi, sources include a public professional biography, Cipla’s official annual report, Cipla’s contact route, and a public leadership-transition announcement. The profile currently has three career positions, three education records, one person-direct leadership remit, one organisational work record, two problems, four themes and two inferred JTBD hypotheses.
+
+## Validation status
+
+- Frontend tests: 21 passed.
+- Frontend production build: passed.
+- Backend suite: 218 passed.
+- Integration suite: 14 passed.
+- `git diff --check`: passed.
+- Production routes `/`, `/contacts`, `/contacts/:id`, `/opportunities`, `/evidence`, `/crawler`, `/settings`: HTTP 200.
+- Supabase security advisors were run after the migration. Existing findings remain for protected legacy tables/functions; no anonymous policy was added by this work. New-table foreign-key indexing advisories are informational performance findings.
+
+## Known blockers and limitations
+
+- A fully automated authenticated-browser test of manual edit/note persistence was not available in the final verification environment; persistence is implemented through live Supabase mutations and the schema is deployed.
+- Broader person-specific research remains limited where public sources do not establish publications, patents or education for a person. The UI intentionally shows “not publicly verified.”
+- No Git remote was configured in this worktree, so the commit could not be pushed from here.
+- Existing unrelated working-tree modifications and generated outputs remain uncommitted; they are visible in `git status` and were not altered by the Contact 360 commit.
+
+## Current task
+
+The next safe step is to run an authenticated browser acceptance pass against `https://svak-intelligence.pages.dev`: open Vijayasarathi’s Contact 360, edit a title, add a note, refresh, sign out/in, and verify the records remain. Then enrich additional current contacts using the same normalized model and source/provenance rules.
