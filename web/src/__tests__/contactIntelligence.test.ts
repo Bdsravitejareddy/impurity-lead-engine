@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { dedupeSources, normalizeContactIntelligence, sourceCoverage, researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText } from '../data/contactIntelligence'
+import { dedupeSources, normalizeContactIntelligence, sourceCoverage, researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText, isSuspiciousExtractedField } from '../data/contactIntelligence'
 
 describe('contact intelligence normalization', () => {
   it('deduplicates a source URL while retaining status', () => {
@@ -39,6 +39,12 @@ describe('contact intelligence normalization', () => {
   it('extracts basic text operands from a supplied PDF buffer without claiming unsupported facts', () => {
     const buffer = new TextEncoder().encode('BT (Keisuke Inoue) (Site Quality) ET').buffer
     expect(extractPdfText(buffer)).toContain('Keisuke Inoue')
+  })
+  it('flags corrupted extracted education text without deleting the source value', () => {
+    expect(isSuspiciousExtractedField('be UCS $ / >> P')).toBe(true)
+    expect(isSuspiciousExtractedField('MSc Chemistry')).toBe(false)
+    const profile = extractProfessionalProfile('Education\nMaster be UCS $ / >> P from University of Mumbai', 'Example')
+    expect(profile.education[0]?.review_suggested).toBe(true)
   })
   it('structures a messy full-profile export without turning navigation text into work', () => {
     const profile = extractProfessionalProfile(`
