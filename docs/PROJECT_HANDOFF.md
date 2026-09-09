@@ -164,3 +164,13 @@ The next safe step is to run an authenticated browser acceptance pass against `h
 - Acceptance tests cover Vijayasarathi Ramaswami vs Vijayasarathi R with Cipla/Global Quality context and Jitendra Singh common-name collision protection.
 - Contextual-resolution deployment: `https://ad29ba3e.svak-intelligence.pages.dev`; production alias serves `assets/index-YJ8Eo1QE.js` and returned HTTP 200 for `/` and `/contacts`.
 - Alias correction: `name_variants` now emits `vijayasarathi ramaswami`, `vijayasarathi R`, `V Ramaswami`, and `V. Ramaswami`; redundant middle-initial combinations are suppressed. Full backend validation remains `226 passed`; integration remains `14 passed`; frontend remains `26 passed`.
+
+## Professional profile workspace update (2026-09-09)
+
+- Added a dedicated `Import professional profile` flow inside Contact 360 with equal PDF/TXT export upload, full-text paste, and structured form entry points.
+- The parser now captures identity context, headline/about, current role, repeatable positions, education, certifications, projects/publications/patents, activity and explicit skills while filtering common LinkedIn navigation labels.
+- Supplied content is retained in `contact_sources` with raw content, extraction JSON, content hash, provenance and terminal `USED`/`PENDING_REVIEW` state. Structured facts are written to the existing source-linked Contact Intelligence tables; accepted profile field changes are audited in `contact_history`.
+- `Save profile only` persists immediate intelligence. `Save & research` additionally creates a durable `QUEUED` research run for the existing backend Contact Research Worker. No new crawler or schema was introduced.
+- Date normalization prevents year-only profile dates from failing Postgres date columns. A regression test covers a messy full-profile export, duplicate UI headings and bounded query generation.
+- Validation for this update: frontend `27 passed`, backend `226 passed`, integration `14 passed`, build passed, `git diff --check` passed. Production deployment is pending the final targeted commit.
+- Known limitation: browser-level authenticated production mutation was not performed in this pass; the UI writes through the existing authenticated Supabase client and the backend worker remains asynchronous.
