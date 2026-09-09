@@ -29,7 +29,7 @@ def test_common_name_requires_context_and_does_not_merge_on_name_only():
 
 def test_name_variants_are_bounded_and_useful():
     variants = name_variants("Dr. Vijayasarathi Ramaswami")
-    assert "vijayasarathi ramaswami" in variants
+    assert "Vijayasarathi Ramaswami" in variants
     assert "vijayasarathi R" in variants
     assert "V Ramaswami" in variants
     assert "V. Ramaswami" in variants

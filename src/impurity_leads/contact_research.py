@@ -36,8 +36,9 @@ def name_variants(name: str) -> list[str]:
     if not tokens:
         return []
     first, last = tokens[0], tokens[-1]
+    display_name = " ".join(token.capitalize() for token in tokens)
     variants = [
-        " ".join(tokens),
+        display_name,
         f"{first} {last[0].upper()}",
         f"{first[0].upper()} {last.title()}",
         f"{first[0].upper()}. {last.title()}",
