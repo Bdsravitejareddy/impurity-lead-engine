@@ -40,4 +40,38 @@ describe('contact intelligence normalization', () => {
     const buffer = new TextEncoder().encode('BT (Keisuke Inoue) (Site Quality) ET').buffer
     expect(extractPdfText(buffer)).toContain('Keisuke Inoue')
   })
+  it('structures a messy full-profile export without turning navigation text into work', () => {
+    const profile = extractProfessionalProfile(`
+      Home
+      Vijayasarathi Ramaswami
+      Global Head of Quality
+      Cipla Limited
+      Mumbai, India
+      About
+      Quality and analytical development leader supporting regulated pharmaceutical programs.
+      Experience
+      2022 – Present: Global Head of Quality at Cipla Limited
+      2018 – 2022: Vice President, Quality at Example Pharma
+      Education
+      Master of Pharmacy from University of Mumbai
+      Licenses & certifications
+      Good Manufacturing Practice — ISPE
+      Projects
+      Global analytical readiness programme
+      Publications
+      Stability indicating method validation for complex generics
+      Skills
+      Analytical Development, CMC, Stability, Quality Systems
+      LinkedIn
+      See more
+    `, 'Vijayasarathi Ramaswami')
+    expect(profile.currentCompany).toMatch(/Cipla/i)
+    expect(profile.positions.length).toBeGreaterThanOrEqual(2)
+    expect(profile.education.length).toBeGreaterThan(0)
+    expect(profile.certifications?.length).toBe(1)
+    expect(profile.works.some(work => /analytical readiness/i.test(work.title))).toBe(true)
+    expect(profile.skills).toEqual(expect.arrayContaining(['Analytical Development', 'CMC']))
+    expect(profile.works.some(work => /^LinkedIn$/i.test(work.title))).toBe(false)
+    expect(researchQueries(profile, 'Vijayasarathi Ramaswami').length).toBeLessThanOrEqual(20)
+  })
 })
