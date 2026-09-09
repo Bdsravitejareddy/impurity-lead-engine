@@ -162,3 +162,4 @@ The next safe step is to run an authenticated browser acceptance pass against `h
 - Research queries now include bounded aliases such as full name, first-name plus surname initial, and first-name initial plus surname. A name-only match cannot confirm a common-name identity.
 - A blocked LinkedIn URL can be supplied later with profile text while retaining the same canonical source URL. The transition is recorded in `contact_history`, and the supplied content is parsed into the existing Contact 360 model.
 - Acceptance tests cover Vijayasarathi Ramaswami vs Vijayasarathi R with Cipla/Global Quality context and Jitendra Singh common-name collision protection.
+- Contextual-resolution deployment: `https://ad29ba3e.svak-intelligence.pages.dev`; production alias serves `assets/index-YJ8Eo1QE.js` and returned HTTP 200 for `/` and `/contacts`.
