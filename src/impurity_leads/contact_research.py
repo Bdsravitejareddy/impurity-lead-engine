@@ -19,10 +19,101 @@ EUROPE_PMC = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 TECHNICAL_TERMS = ("analytical", "quality", "impurity", "degradation", "stability", "method", "regulatory", "cmc", "api", "validation")
 SOURCE_LIMIT_PER_QUERY = 5
 QUERY_LIMIT = 20
+_GENERIC_FIRST_NAMES = {"john", "james", "michael", "david", "robert", "jitendra", "singh", "kumar", "raj", "ravi"}
 
 
 def _normalise_query(value: str) -> str:
     return " ".join(value.split()).strip()
+
+
+def _name_tokens(value: str) -> list[str]:
+    return normalize_person_name(value).split()
+
+
+def name_variants(name: str) -> list[str]:
+    """Return bounded, useful professional aliases for a person's name."""
+    tokens = _name_tokens(name)
+    if not tokens:
+        return []
+    first, last = tokens[0], tokens[-1]
+    variants = [" ".join(tokens), f"{first} {last[0].upper()}", f"{first[0].upper()} {last.title()}"]
+    if len(tokens) > 2:
+        variants.append(f"{first} {tokens[1][0].upper()} {last}")
+    return list(dict.fromkeys(variants))
+
+
+def _name_compatibility(canonical: str, candidate: str) -> tuple[float, list[str]]:
+    expected = _name_tokens(canonical)
+    observed = _name_tokens(candidate)
+    if not expected or not observed:
+        return 0.0, []
+    evidence: list[str] = []
+    if expected == observed or (len(observed) >= len(expected) and expected == observed[:len(expected)]):
+        return 1.0, ["normalized full name matches"]
+    first_match = expected[0] == observed[0]
+    surname_match = expected[-1] == observed[-1]
+    surname_initial = first_match and len(observed[-1]) == 1 and observed[-1] == expected[-1][0]
+    initial_surname = len(observed[0]) == 1 and observed[0] == expected[0][0] and surname_match
+    if first_match:
+        evidence.append("first name matches")
+    if surname_match:
+        evidence.append("surname matches")
+    if surname_initial:
+        evidence.append("surname initial is compatible")
+    if initial_surname:
+        evidence.append("first-name initial and surname are compatible")
+    if first_match and (surname_match or surname_initial):
+        return 0.88 if surname_match else 0.80, evidence
+    if initial_surname:
+        return 0.78, evidence
+    if first_match:
+        return 0.50, evidence
+    # A distinctive first name is a candidate seed, never a confirmed match.
+    if len(expected[0]) >= 8 and expected[0] == observed[0]:
+        return 0.52, ["distinctive first name matches"]
+    return 0.0, evidence
+
+
+def resolve_identity(contact: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+    """Resolve a candidate person using name plus professional context.
+
+    The result is deliberately explainable and conservative.  Name similarity
+    alone cannot confirm an identity; context is required for confirmation.
+    """
+    canonical = str(contact.get("display_name") or contact.get("name") or "")
+    observed = str(candidate.get("displayName") or candidate.get("name") or candidate.get("authorString") or "")
+    name_score, evidence = _name_compatibility(canonical, observed)
+    expected_company = " ".join(str(contact.get(key) or "") for key in ("company", "company_name", "employer")).casefold()
+    observed_company = " ".join(str(candidate.get(key) or "") for key in ("company", "company_name", "employer", "institution")).casefold()
+    company_match = bool(expected_company and observed_company and (expected_company in observed_company or observed_company in expected_company))
+    expected_role = " ".join(str(contact.get(key) or "") for key in ("title", "department", "function")).casefold()
+    observed_role = " ".join(str(candidate.get(key) or "") for key in ("title", "department", "function", "headline")).casefold()
+    role_terms = {term for term in ("quality", "analytical", "api", "cmc", "regulatory", "stability", "process", "development", "operations") if term in expected_role}
+    role_match = bool(role_terms and any(term in observed_role for term in role_terms))
+    expected_location = str(contact.get("location") or contact.get("country") or "").casefold()
+    observed_location = str(candidate.get("location") or candidate.get("country") or "").casefold()
+    location_match = bool(expected_location and observed_location and (expected_location in observed_location or observed_location in expected_location))
+    if company_match:
+        evidence.append("company/employer matches")
+    if role_match:
+        evidence.append("role/function is compatible")
+    if location_match:
+        evidence.append("professional location matches")
+    score = 35 * name_score + (25 if company_match else 0) + (20 if role_match else 0) + (10 if location_match else 0)
+    # Full-name matches still need context for confirmation; abbreviated names
+    # with company and role context can be probable/confirmed safely.
+    if name_score >= 0.78 and company_match and role_match and score >= 70:
+        state = "CONFIRMED_MATCH"
+    elif name_score >= 0.78 and (company_match or role_match) and score >= 50:
+        state = "PROBABLE_MATCH"
+    elif name_score >= 0.5 and (company_match or role_match):
+        state = "NEEDS_REVIEW"
+    else:
+        state = "REJECTED_MATCH"
+    contradicting = []
+    if expected_company and observed_company and not company_match:
+        contradicting.append("company/employer does not match")
+    return {"state": state, "confidence": round(min(100.0, score), 1), "name_score": round(name_score * 100, 1), "company_match": company_match, "role_match": role_match, "location_match": location_match, "supporting_evidence": evidence, "contradicting_evidence": contradicting}
 
 
 def _get_json(url: str, timeout: float = 15.0) -> dict[str, Any]:
@@ -42,9 +133,12 @@ def _queries(contact: dict[str, Any], sources: list[dict[str, Any]]) -> list[str
             terms.append(str(extraction["currentCompany"]))
     unique: list[str] = []
     seen: set[str] = set()
+    aliases = name_variants(name)
+    company = next((str((source.get("extraction_json") or {}).get("currentCompany")) for source in sources if (source.get("extraction_json") or {}).get("currentCompany")), "")
     candidates = [
-        f'"{name}" publication', f'"{name}" patent', f'"{name}" conference',
-        f'"{name}" webinar', f'"{name}" analytical', f'"{name}" quality',
+        *[f'"{alias}" {company} publication' for alias in aliases],
+        *[f'"{alias}" {company} patent' for alias in aliases[:2]],
+        f'"{name}" conference', f'"{name}" webinar', f'"{name}" analytical', f'"{name}" quality',
         *terms,
     ]
     for candidate in candidates:
@@ -57,17 +151,12 @@ def _queries(contact: dict[str, Any], sources: list[dict[str, Any]]) -> list[str
 
 
 def _identity(contact: dict[str, Any], result: dict[str, Any]) -> str:
-    expected = normalize_person_name(contact.get("display_name") or "")
-    authors = normalize_person_name(result.get("authorString") or "")
-    if not expected or not authors:
-        return "REJECTED"
-    expected_tokens = set(expected.split())
-    author_tokens = set(authors.split())
-    if len(expected_tokens.intersection(author_tokens)) >= 2:
+    resolved = resolve_identity(contact, result)
+    if resolved["name_score"] >= 100:
         return "HIGH"
-    if expected_tokens and expected_tokens.intersection(author_tokens):
+    if resolved["name_score"] >= 50 and not resolved["contradicting_evidence"]:
         return "MEDIUM"
-    return "LOW"
+    return {"CONFIRMED_MATCH": "HIGH", "PROBABLE_MATCH": "HIGH", "NEEDS_REVIEW": "MEDIUM", "REJECTED_MATCH": "LOW"}[resolved["state"]]
 
 
 def _terminal_source(*, contact_id: str, url: str, title: str, source_date: str | None,
@@ -200,9 +289,12 @@ def run_pending_contact_research(settings, *, limit: int = 10, fetcher: Callable
                         continue
                     seen_urls.add(url)
                     text = " ".join(str(item.get(key) or "") for key in ("title", "abstractText", "authorString"))
-                    identity = _identity(contact, item)
+                    source_company = next((str((source.get("extraction_json") or {}).get("currentCompany")) for source in supplied if (source.get("extraction_json") or {}).get("currentCompany")), "")
+                    candidate_context = {**item, "company": source_company or item.get("company") or item.get("institution") or ""}
+                    resolved = resolve_identity({**contact, "company": source_company or contact.get("company") or contact.get("company_name") or ""}, candidate_context)
+                    identity = {"CONFIRMED_MATCH": "HIGH", "PROBABLE_MATCH": "HIGH", "NEEDS_REVIEW": "MEDIUM", "REJECTED_MATCH": "LOW"}[resolved["state"]]
                     technical = any(term in text.lower() for term in TECHNICAL_TERMS)
-                    status = "USED" if identity == "HIGH" and technical else "REJECTED"
+                    status = "USED" if identity == "HIGH" and technical and resolved["state"] in {"CONFIRMED_MATCH", "PROBABLE_MATCH"} else "REJECTED"
                     reason = None if status == "USED" else ("WRONG_PERSON" if identity in {"LOW", "REJECTED"} else "WEAK_EVIDENCE")
                     source = _terminal_source(contact_id=contact["id"], url=url, title=title, source_date=item.get("firstPublicationDate") or None, query=query, result=item, status=status, reason=reason, technical=technical, identity=identity)
                     source_response = client.table("contact_sources").upsert(source, on_conflict="contact_id,url").select("id").execute()

@@ -155,3 +155,10 @@ The next safe step is to run an authenticated browser acceptance pass against `h
 - The Contact 360 Overview now displays query/source disposition and enrichment metrics, and the Sources tab supports source-type and terminal-status filters.
 - Current limitation: this first worker stage has a Europe PMC adapter only. Official-company, patent, conference, regulatory, and broad-web adapters are not yet implemented; queued runs therefore provide bounded scientific-publication corroboration rather than exhaustive web research. Production execution requires the existing scheduled GitHub Actions job with its configured backend secret.
 - Validation after the worker change: backend `223 passed`, integration `14 passed`, frontend `26 passed`, Vite build passed, and `git diff --check` passed. The tested build is deployed at `https://7404c2d6.svak-intelligence.pages.dev` and the production alias returned HTTP 200 for `/`, `/contacts`, and `/crawler` with asset `assets/index-mLWR4FjA.js`.
+
+## Entity-resolution update (2026-09-09)
+
+- Added explainable professional-person resolution with normalized aliases, initials and surname-initial compatibility. Candidate confidence combines name compatibility with employer, role/function and location context; outcomes are `CONFIRMED_MATCH`, `PROBABLE_MATCH`, `NEEDS_REVIEW`, or `REJECTED_MATCH`.
+- Research queries now include bounded aliases such as full name, first-name plus surname initial, and first-name initial plus surname. A name-only match cannot confirm a common-name identity.
+- A blocked LinkedIn URL can be supplied later with profile text while retaining the same canonical source URL. The transition is recorded in `contact_history`, and the supplied content is parsed into the existing Contact 360 model.
+- Acceptance tests cover Vijayasarathi Ramaswami vs Vijayasarathi R with Cipla/Global Quality context and Jitendra Singh common-name collision protection.
