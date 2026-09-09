@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
 import { dedupeSources, normalizeContactIntelligence, sourceCoverage, researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText, isSuspiciousExtractedField } from '../data/contactIntelligence'
 import { normalizeProfileRows, profileSourceKey } from '../data/profilePersistence'
 
@@ -37,9 +39,26 @@ describe('contact intelligence normalization', () => {
     expect(coverage.blocked).toBe(1)
     expect(coverage.rejected).toBe(0)
   })
-  it('extracts basic text operands from a supplied PDF buffer without claiming unsupported facts', () => {
+  it('extracts a structured PDF result and warns when machine-readable text is sparse', async () => {
     const buffer = new TextEncoder().encode('BT (Keisuke Inoue) (Site Quality) ET').buffer
-    expect(extractPdfText(buffer)).toContain('Keisuke Inoue')
+    const result = await extractPdfText(buffer)
+    expect(result.text).toBe('')
+    expect(result.warnings.join(' ')).toMatch(/machine-readable|could not be read/i)
+  })
+  it('parses a realistic multi-role LinkedIn profile by section', () => {
+    const profile = extractProfessionalProfile(`
+      Home\nMy Network\nMessaging\n\nAsha Rao\nDirector, Analytical Development\nMumbai, India\n\nAbout\nAnalytical development leader for complex generic products and stability programmes.\n\nExperience\nCipla Limited\nDirector, Analytical Development\nJan 2022 - Present\nMumbai, India\nLeads analytical readiness and method validation across regulated programmes.\nManager, Analytical R&D\n2018 - 2022\nMumbai, India\n\nNova Therapeutics\nScientist, CMC\n2015 - 2018\n\nEducation\nUniversity of Mumbai\nMaster of Pharmacy\nPharmaceutical Chemistry\n2009 - 2011\n\nLicenses & certifications\nGood Manufacturing Practice — ISPE\n\nProjects\nGlobal stability method programme\n\nPublications\nStability-indicating method validation for complex generics\n\nPatents\nImpurity control process\n\nSkills\nAnalytical Development, CMC, Method Validation, Quality Systems\n    `, 'Asha Rao')
+    expect(profile.currentTitle).toMatch(/Director/i)
+    expect(profile.currentCompany).toMatch(/Cipla/i)
+    expect(profile.positions.length).toBe(3)
+    expect(profile.positions[0].end_date).toBe('')
+    expect(profile.positions.slice(0, 2).every(position => /Cipla/i.test(position.company_name || ''))).toBe(true)
+    expect(profile.education[0]).toMatchObject({institution: 'University of Mumbai', degree: 'Master of Pharmacy', field: 'Pharmaceutical Chemistry'})
+    expect(profile.certifications?.[0].name).toMatch(/Good Manufacturing/i)
+    expect(profile.works.some(work => work.work_type === 'PROJECT')).toBe(true)
+    expect(profile.works.some(work => work.work_type === 'PUBLICATION')).toBe(true)
+    expect(profile.works.some(work => work.work_type === 'PATENT')).toBe(true)
+    expect(profile.skills).toEqual(expect.arrayContaining(['Analytical Development', 'CMC']))
   })
   it('flags corrupted extracted education text without deleting the source value', () => {
     expect(isSuspiciousExtractedField('be UCS $ / >> P')).toBe(true)
@@ -96,5 +115,13 @@ describe('contact intelligence normalization', () => {
     expect(profile.skills).toEqual(expect.arrayContaining(['Analytical Development', 'CMC']))
     expect(profile.works.some(work => /^LinkedIn$/i.test(work.title))).toBe(false)
     expect(researchQueries(profile, 'Vijayasarathi Ramaswami').length).toBeLessThanOrEqual(20)
+  })
+  it('extracts text from a sanitized LinkedIn-style PDF fixture page by page', async () => {
+    const bytes = await readFile(resolve(process.cwd(), 'src/__tests__/fixtures/linkedin-profile-sample.pdf'))
+    const result = await extractPdfText(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+    expect(result.pages).toBe(1)
+    expect(result.warnings).toEqual([])
+    expect(result.text).toContain('Director, Analytical Development')
+    expect(extractProfessionalProfile(result.text, 'Asha Rao').currentCompany).toMatch(/Cipla/i)
   })
 })

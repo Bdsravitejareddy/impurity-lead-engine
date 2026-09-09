@@ -5,42 +5,154 @@ export const emptyIntelligence = (): ContactIntelligence => ({sources:[],positio
 export function dedupeSources(rows: any[] = []): ContactSource[] { const seen = new Map<string, any>(); for (const row of rows) { const key = String(row.url || '').trim().toLowerCase(); if (key && !seen.has(key)) seen.set(key, row) } return [...seen.values()] }
 export function normalizeContactIntelligence(contactId: string, tables: Record<string, any[]>): ContactIntelligence { return { sources: dedupeSources(tables.sources?.filter(x => x.contact_id === contactId) ?? []), positions: tables.positions?.filter(x => x.contact_id === contactId) ?? [], education: tables.education?.filter(x => x.contact_id === contactId) ?? [], works: tables.works?.filter(x => x.contact_id === contactId) ?? [], problems: tables.problems?.filter(x => x.contact_id === contactId) ?? [], themes: tables.themes?.filter(x => x.contact_id === contactId) ?? [], jtbd: tables.jtbd?.filter(x => x.contact_id === contactId) ?? [], claims: tables.claims?.filter(x => x.contact_id === contactId) ?? [], notes: tables.notes?.filter(x => x.contact_id === contactId) ?? [], history: tables.history?.filter(x => x.contact_id === contactId) ?? [], conflicts: tables.conflicts?.filter(x => x.contact_id === contactId) ?? [], researchRuns: tables.researchRuns?.filter(x => x.contact_id === contactId) ?? [] } }
 export function sourceCoverage(sources: ContactSource[]) { const classes = new Set(sources.map(s => s.source_type)); return { inspected: sources.length, used: sources.filter(s => s.status === 'USED').length, rejected: sources.filter(s => s.status === 'REJECTED').length, blocked: sources.filter(s => s.status === 'BLOCKED_AUTH').length, pending: sources.filter(s => s.status === 'PENDING_REVIEW').length, classes: classes.size, byType: [...classes].map(type => ({type, inspected: sources.filter(s => s.source_type === type).length, used: sources.filter(s => s.source_type === type && s.status === 'USED').length, rejected: sources.filter(s => s.source_type === type && s.status === 'REJECTED').length})) } }
-export type ProfilePosition = {title:string; company_name?:string; department?:string; start_date?:string; end_date?:string; attribution:'PERSON_DIRECT'; confidence:number}
-export type ProfileEducation = {institution:string; degree?:string; field?:string; start_date?:string; end_date?:string; confidence:number; review_suggested?:boolean}
-export type ProfileWork = {title:string; work_type:string; work_date?:string; topic?:string; url?:string; attribution:'PERSON_DIRECT'; confidence:number}
-export type ProfileExtraction = { claims: string[]; currentTitle?: string; headline?: string; currentCompany?: string; location?: string; about?: string; skills?: string[]; certifications?: {name:string; issuer?:string; issue_date?:string; expiry_date?:string; credential_url?:string; confidence:number}[]; activities?: ProfileWork[]; positions: ProfilePosition[]; education: ProfileEducation[]; themes: string[]; keywords: string[]; works: ProfileWork[] }
-const profileHeadings = ['About','Experience','Education','Licenses & certifications','Certifications','Projects','Publications','Skills','Activity','Recommendations']
-function profileSection(text: string, heading: string): string {
-  const lines = text.split(/\r?\n/).map(x => x.trim()); const headingLower = heading.toLowerCase(); const start = lines.findIndex(x => x.toLowerCase() === headingLower); if (start < 0) return ''
-  const end = lines.findIndex((x, i) => i > start && profileHeadings.some(h => h.toLowerCase() === x.toLowerCase())); return lines.slice(start + 1, end < 0 ? lines.length : end).filter(Boolean).join('\n').trim()
+export type ProfilePosition = {title:string; company_name?:string; department?:string; start_date?:string; end_date?:string; location?:string; description?:string; employment_type?:string; attribution:'PERSON_DIRECT'; confidence:number; review_suggested?:boolean}
+export type ProfileEducation = {institution:string; degree?:string; field?:string; start_date?:string; end_date?:string; description?:string; confidence:number; review_suggested?:boolean}
+export type ProfileWork = {title:string; work_type:string; work_date?:string; topic?:string; url?:string; authors?:string; publisher?:string; description?:string; attribution:'PERSON_DIRECT'; confidence:number; review_suggested?:boolean}
+export type PdfTextExtraction = { text: string; pages: number; warnings: string[] }
+export type ProfileExtraction = { claims: string[]; currentTitle?: string; headline?: string; currentCompany?: string; location?: string; about?: string; skills?: string[]; certifications?: {name:string; issuer?:string; issue_date?:string; expiry_date?:string; credential_url?:string; confidence:number; review_suggested?:boolean}[]; activities?: ProfileWork[]; positions: ProfilePosition[]; education: ProfileEducation[]; themes: string[]; keywords: string[]; works: ProfileWork[]; warnings?: string[]; pages?: number }
+
+const sectionAliases: Record<string, string> = {
+  'about':'ABOUT','experience':'EXPERIENCE','work experience':'EXPERIENCE','education':'EDUCATION',
+  'licenses & certifications':'CERTIFICATIONS','licenses and certifications':'CERTIFICATIONS','certifications':'CERTIFICATIONS',
+  'projects':'PROJECTS','publications':'PUBLICATIONS','patents':'PATENTS','skills':'SKILLS','activity':'ACTIVITY',
+  'recommendations':'RECOMMENDATIONS','honors & awards':'OTHER','honours & awards':'OTHER','volunteer experience':'OTHER',
+  'languages':'OTHER','interests':'OTHER'
 }
+const profileHeadings = Object.keys(sectionAliases)
+const uiNoise = /^(home|my network|messaging|notifications|jobs|contact info|see more|show all|linkedin|follow|connect|send message|subscribe|followers?|connections?|people also viewed|interests?)$/i
+const dateRange = /^(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+)?(?:19|20)\d{2}\s*(?:[-–—]|to)\s*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+)?(?:(?:19|20)\d{2}|present|current)(?:\s*:\s*.*)?$/i
+const durationLine = /^\d+\s+(?:yr|yrs|year|years|mo|mos|month|months)/i
+const cleanLine = (line: string) => line.replace(/\u00a0/g, ' ').replace(/[\t ]+/g, ' ').trim()
+const usefulLines = (text: string) => text.split(/\r?\n/).map(cleanLine).filter(Boolean)
+const canonicalHeading = (line: string) => sectionAliases[line.toLowerCase().replace(/\s+/g, ' ').trim()]
+
+function splitProfileSections(text: string): { sections: Record<string,string[]>; preamble: string[] } {
+  const sections: Record<string,string[]> = { PROFILE: [] }; let current = 'PROFILE'
+  for (const original of usefulLines(text)) {
+    const line = original.replace(/^[•·▪]\s*/, '').trim(); const heading = canonicalHeading(line)
+    if (heading) { current = heading; if (!sections[current]) sections[current] = []; continue }
+    if (uiNoise.test(line)) continue
+    sections[current].push(line)
+  }
+  return { sections, preamble: sections.PROFILE || [] }
+}
+
 export function isSuspiciousExtractedField(value: string): boolean {
   const text = value.trim();
   const letters = (text.match(/[A-Za-z]/g) || []).length;
-  const symbols = (text.match(/[^\p{L}\p{N}\s.,&()'\-]/gu) || []).length;
-  return letters < 4 || symbols >= 4 || /(?:>>|<<|\$\s*\/|\/\s*[>$])/.test(text) || /(?:\b(?:ucs|pdf|obj|endobj)\b)/i.test(text) && symbols > 1;
+  const symbols = (text.match(/[^\p{L}\p{N}\s.,&()'\-/]/gu) || []).length;
+  const words = text.split(/\s+/).filter(Boolean)
+  return letters < 4 || (symbols >= 4 && symbols / Math.max(1, text.length) > 0.12) || /(?:>>|<<|\$\s*\/|\/\s*[>$])/.test(text) || /(?:\b(?:ucs|pdf|obj|endobj|stream|xref)\b)/i.test(text) && symbols > 1 || words.length > 1 && words.every(word => /^[^A-Za-z]*$/.test(word))
 }
 
-export function extractProfessionalProfile(text: string, name = ''): ProfileExtraction {
-  const clean = text.replace(/\u00a0/g, ' ').replace(/[ \t]+/g, ' ').trim(); const lines = text.split(/\r?\n/).map(x => x.trim()).filter(Boolean).filter(x => !/^(home|about|experience|education|skills|interests|contact info|see more|show all|linkedin)$/i.test(x))
-  const currentTitle = lines.find(x => /\b(head|director|vice president|vp|chief|manager|scientist|quality|analytical|cmc|r&d|development)\b/i.test(x) && x.length < 180)
-  const currentCompany = lines.find(x => /\b(pharma|pharmaceutical|laboratories|laboratory|therapeutics|biotech|cipla|takeda|novartis|bayer|lupin)\b/i.test(x) && x.length < 140)
-  const location = lines.find(x => /\b(india|japan|usa|united states|uk|united kingdom|mumbai|tokyo|london|new york|singapore)\b/i.test(x) && x.length < 120)
-  const positions: ProfilePosition[] = [...clean.matchAll(/((?:19|20)\d{2})\s*(?:-|–|to)\s*(Present|(?:19|20)\d{2})\s*[:|,-]?\s*([^;|.\n]{3,100}?)(?:\s+at\s+|,\s+)([^;|.\n]{2,100})/gi)].slice(0, 12).map(m => ({start_date:m[1], end_date:/present/i.test(m[2])?'':m[2], title:m[3].trim(), company_name:m[4].trim(), attribution:'PERSON_DIRECT', confidence:0.85}))
-  if (currentTitle && currentCompany && !positions.some(p => p.title === currentTitle)) positions.unshift({title:currentTitle, company_name:currentCompany, attribution:'PERSON_DIRECT', confidence:0.82})
-  const education: ProfileEducation[] = [...clean.matchAll(/(?:M\.?(?:Sc|Pharm|Tech|BA|BS|MBA)|B\.?(?:Pharm|Tech|Sc|E)|Ph\.?D|Post Graduate|Bachelor|Master)[^.;|\n]{0,120}/gi)].slice(0, 8).map(m => { const degree=m[0].trim(); const institution=(m[0].match(/(?:at|from)\s+([^,.;|]+)/i)?.[1] || 'Institution not specified').trim(); const review_suggested=isSuspiciousExtractedField(degree)||isSuspiciousExtractedField(institution); return {institution, degree, confidence:review_suggested?0.25:0.75, review_suggested} })
-  const certSection = profileSection(text, 'Licenses & certifications') || profileSection(text, 'Certifications'); const certifications = certSection.split(/\n|;|•/).map(x=>x.trim()).filter(x=>x.length>2).slice(0,20).map(name=>({name,confidence:0.7}))
-  const projectSection = profileSection(text, 'Projects'); const projectWorks: ProfileWork[] = projectSection.split(/\n|•/).map(x=>x.trim()).filter(x=>x.length>3).slice(0,12).map(title=>({title,work_type:'PROJECT',attribution:'PERSON_DIRECT',confidence:0.7}))
-  const activitySection = profileSection(text, 'Activity'); const activities: ProfileWork[] = activitySection.split(/\n/).map(title=>title.trim()).filter(x=>x.length>20).slice(0,12).map(title=>({title,work_type:'PROFESSIONAL_ACTIVITY',attribution:'PERSON_DIRECT',confidence:0.65}))
-  const themeTerms = ['analytical development','analytical','quality','quality control','quality assurance','CMC','stability','degradation','impurity','regulatory','process development','API','method validation','nitrosamine']; const themes = themeTerms.filter(t => clean.toLowerCase().includes(t.toLowerCase()))
-  const keywords = [...new Set([name, currentCompany, currentTitle, location, ...themes].filter(Boolean).flatMap(x => String(x).split(/\s+/).filter(w => w.length > 3)))].slice(0, 50)
-  const works: ProfileWork[] = [...projectWorks, ...lines.filter(x => /\b(publication|patent|conference|webinar|project|presentation|poster|study|method|validation)\b/i.test(x)).slice(0, 12).map(title => ({title, work_type:/patent/i.test(title)?'PATENT':/publication|study|method/i.test(title)?'PUBLICATION':'PROFESSIONAL_ACTIVITY', attribution:'PERSON_DIRECT', confidence:0.7}))]
-  const about = profileSection(text, 'About'); const skillsSection = profileSection(text, 'Skills'); const skills = skillsSection.split(/,|\n|•/).map(x=>x.trim()).filter(x=>x.length>1 && x.length<80).slice(0,40)
-  const claims = [currentTitle && `Current title: ${currentTitle}`, currentCompany && `Current employer context: ${currentCompany}`, location && `Professional location: ${location}`, about && `Professional summary: ${about.slice(0,400)}`, skills.length && `Explicit professional skills: ${skills.join(', ')}`, certifications.length && `Certifications supplied: ${certifications.map(c=>c.name).join(', ')}`].filter(Boolean) as string[]
-  return {claims, currentTitle, headline:currentTitle, currentCompany, location, about, skills, certifications, activities, positions, education, themes, keywords, works}
+function confidenceFor(value: string, explicit = true) { return isSuspiciousExtractedField(value) ? 0.25 : explicit ? 0.95 : 0.75 }
+function parseDateRange(value: string): { start_date?: string; end_date?: string } { const match = value.match(/((?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+)?(?:19|20)\d{2})\s*(?:[-–—]|to)\s*((?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+)?(?:19|20)\d{2}|present|current)/i); return match ? {start_date: match[1], end_date: /^present|current$/i.test(match[2]) ? '' : match[2]} : {} }
+function isDateLine(line: string) { return dateRange.test(line) }
+function isLikelyCompany(line: string) { return /\b(pharma(?:ceuticals?)?|laborator(?:y|ies)|therapeutics?|biotech|inc\.?|ltd\.?|limited|corporation|corp\.?|holdings?|university|institute|hospital|group|cipla|takeda|novartis|bayer|lupin)\b/i.test(line) }
+function isLikelyDegree(line: string) { return /\b(?:M\.?\s*(?:Sc|Pharm|Tech|Eng|BA|BS|MBA)|B\.?\s*(?:Pharm|Tech|Sc|Eng|BA|BS)|Ph\.?\s*D|Bachelor|Master|Doctor|Diploma|Certificate|Post[- ]?graduate|Fellowship)\b/i.test(line) }
+function sectionLines(sections: Record<string,string[]>, key: string) { return (sections[key] || []).filter(line => !uiNoise.test(line) && line.length > 1) }
+
+function parseExperience(lines: string[]): ProfilePosition[] {
+  const positions: ProfilePosition[] = []; let lastDateIndex = -1; let currentCompany = ''
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]; if (!isDateLine(line)) continue
+    const range = parseDateRange(line); const trailing = line.match(/:\s*(.+)$/)?.[1]?.trim() || ''; const before = lines.slice(lastDateIndex + 1, i).filter(x => !durationLine.test(x) && !isDateLine(x))
+    const inline = before.find(x => /\s+at\s+/i.test(x)); let title = ''; let company = currentCompany; let location = ''
+    if (trailing) { const atMatch = trailing.match(/^(.+?)\s+at\s+(.+)$/i); title = (atMatch ? atMatch[1] : trailing).trim(); company = (atMatch ? atMatch[2] : '').trim(); const priorCompany = before.find(isLikelyCompany); if (priorCompany) company = priorCompany }
+    else if (inline) { const parts = inline.split(/\s+at\s+/i); title = parts[0].trim(); company = parts.slice(1).join(' at ').trim() }
+    else {
+      const candidates = before.filter(x => !/^\d+\s+(?:followers?|connections?)/i.test(x) && !/\b(?:india|japan|tokyo|mumbai|london|new york|singapore|usa|uk)\b/i.test(x))
+      const companyIndex = candidates.findIndex(isLikelyCompany)
+      if (companyIndex >= 0) { company = candidates[companyIndex]; title = candidates[companyIndex + 1] || candidates[companyIndex - 1] || '' }
+      else if (candidates.length >= 2) { title = candidates[candidates.length - 1]; company = currentCompany || candidates[candidates.length - 2] }
+      else if (candidates.length === 1) title = candidates[0]
+      if (title && /,\s*(?:[A-Z][a-z]+(?:,\s*[A-Z][a-z]+)*)$/.test(title)) { const parts = title.split(','); location = parts.pop()!.trim(); title = parts.join(',').trim() }
+    }
+    if (!title || title.length > 160 || uiNoise.test(title)) { lastDateIndex = i; continue }
+    if (!company && i > 0) company = lines.slice(0, i).reverse().find(x => isLikelyCompany(x)) || ''
+    if (company) currentCompany = company
+    const after = lines.slice(i + 1, lines.findIndex((x,j) => j > i && isDateLine(x)) < 0 ? lines.length : lines.findIndex((x,j) => j > i && isDateLine(x))).filter(x => !durationLine.test(x))
+    const description = after.filter(x => x.length > 35 && !/^(?:present|current)$/i.test(x)).slice(0, 3).join(' ')
+    const confidence = confidenceFor(title, true)
+    positions.push({title, company_name: company || undefined, ...range, location: location || undefined, description: description || undefined, attribution:'PERSON_DIRECT', confidence})
+    lastDateIndex = i
+  }
+  return positions.slice(0, 30)
 }
-export function researchQueries(profile: ProfileExtraction, name: string): string[] { const base = [name, profile.currentCompany].filter(Boolean).join(' '); const terms = ['publication','patent','conference','webinar','analytical','quality','CMC','impurity','degradation','stability','method validation']; return [...new Set(terms.map(t => `${base} ${t}`)), ...profile.positions.slice(1,4).flatMap(p => terms.slice(0,4).map(t => `${name} ${p.company_name || ''} ${t}`))].filter(q => q.trim().split(/\s+/).length >= 2).slice(0, 20) }
-export function extractPdfText(buffer: ArrayBuffer): string { const raw = new TextDecoder('latin1').decode(buffer); return [...raw.matchAll(/\(([^()]{3,200})\)/g)].map(m => m[1].replace(/\\[nrt]/g, ' ')).join('\n').replace(/[^\x09\x0A\x0D\x20-\x7E]/g, ' ').replace(/\s+/g, ' ').trim() }
+
+function parseEducation(lines: string[]): ProfileEducation[] {
+  const records: ProfileEducation[] = []; let pending: Partial<ProfileEducation> = {}
+  const flush = () => { if (!pending.institution && !pending.degree) return; const institution = String(pending.institution || 'Institution not specified').trim(); const degree = pending.degree?.trim(); const value = degree || institution; const review_suggested = isSuspiciousExtractedField(value) || isSuspiciousExtractedField(institution); records.push({institution, degree, field: pending.field, start_date: pending.start_date, end_date: pending.end_date, description: pending.description, confidence: review_suggested ? 0.25 : Number(pending.confidence || 0.85), review_suggested}); pending = {} }
+  for (const line of lines) {
+    if (isDateLine(line)) { Object.assign(pending, parseDateRange(line)); continue }
+    const direct = line.match(/^(.+?)\s+(?:from|at)\s+(.+)$/i)
+    if (direct && isLikelyDegree(direct[1])) { flush(); pending = {degree: direct[1].trim(), institution: direct[2].trim(), confidence: 0.9}; continue }
+    if (isLikelyDegree(line)) { if (pending.degree) flush(); pending.degree = line; pending.confidence = 0.9; continue }
+    if (!pending.institution && /\b(?:university|college|institute|school|academy)\b/i.test(line)) { pending.institution = line; continue }
+    if (pending.degree && !pending.field && line.length < 100 && !/^(?:activities|description|coursework)$/i.test(line)) { pending.field = line; continue }
+    if (pending.institution && line.length > 20) pending.description = [pending.description, line].filter(Boolean).join(' ')
+  }
+  flush(); return records.filter(x => x.institution !== 'Institution not specified' || x.degree).slice(0, 20)
+}
+
+function parseWorkSection(lines: string[], type: string): ProfileWork[] { return lines.filter(x => x.length > 2 && !uiNoise.test(x)).slice(0, 30).map(title => ({title, work_type:type, attribution:'PERSON_DIRECT', confidence: confidenceFor(title, false)})) }
+
+export function extractProfessionalProfile(text: string, name = ''): ProfileExtraction {
+  const {sections, preamble} = splitProfileSections(text); const warnings: string[] = []
+  const identityLines = preamble.filter(x => x.length > 1 && !/^\d+\s+(?:followers?|connections?)/i.test(x))
+  const suppliedName = name || identityLines[0] || ''
+  const headline = identityLines.find(x => x !== suppliedName && x.length < 180 && !isLikelyCompany(x) && !/https?:\/\//i.test(x))
+  const location = identityLines.find(x => /\b(india|japan|usa|united states|uk|united kingdom|mumbai|tokyo|london|new york|singapore|canada|germany|switzerland)\b/i.test(x) && x !== headline)
+  const fallbackLines = usefulLines(text)
+  const positions = parseExperience(sectionLines(sections, 'EXPERIENCE').length ? sectionLines(sections, 'EXPERIENCE') : fallbackLines)
+  const current = positions.find(x => x.end_date === '') || positions[0]
+  const currentTitle = current?.title || (headline && /\b(head|director|vice president|vp|chief|manager|scientist|quality|analytical|cmc|r&d|development)\b/i.test(headline) ? headline : undefined)
+  const currentCompany = current?.company_name
+  const about = sectionLines(sections, 'ABOUT').join(' ').trim() || undefined
+  const education = parseEducation(sectionLines(sections, 'EDUCATION').length ? sectionLines(sections, 'EDUCATION') : fallbackLines)
+  const certifications = sectionLines(sections, 'CERTIFICATIONS').map(name => ({name, confidence: confidenceFor(name, true), review_suggested: isSuspiciousExtractedField(name)})).filter(x => x.name.length > 2).slice(0, 30)
+  const projects = parseWorkSection(sectionLines(sections, 'PROJECTS'), 'PROJECT')
+  const publications = parseWorkSection(sectionLines(sections, 'PUBLICATIONS'), 'PUBLICATION')
+  const patents = parseWorkSection(sectionLines(sections, 'PATENTS'), 'PATENT')
+  const activities = parseWorkSection(sectionLines(sections, 'ACTIVITY'), 'PROFESSIONAL_ACTIVITY')
+  const works = [...projects, ...publications, ...patents, ...activities]
+  const skills = sectionLines(sections, 'SKILLS').flatMap(x => x.split(/,|•|;/).map(y => y.trim())).filter(x => x.length > 1 && x.length < 100).slice(0, 60)
+  const profileClaims = [headline && `Professional headline: ${headline}`, currentTitle && `Current title: ${currentTitle}`, currentCompany && `Current company: ${currentCompany}`, location && `Professional location: ${location}`, about && `Professional summary: ${about.slice(0, 600)}`, skills.length && `Explicit professional skills: ${skills.join(', ')}`, certifications.length && `Certifications supplied: ${certifications.map(c => c.name).join(', ')}`].filter(Boolean) as string[]
+  const themes = ['analytical development','analytical','quality','quality control','quality assurance','CMC','stability','degradation','impurity','regulatory','process development','API','method validation','nitrosamine','respiratory','data integrity'].filter(t => text.toLowerCase().includes(t.toLowerCase()))
+  const keywords = [...new Set([suppliedName, currentCompany, currentTitle, location, ...themes, ...skills.slice(0, 10)].filter(Boolean).flatMap(x => String(x).split(/\s+/).filter(w => w.length > 3)))].slice(0, 80)
+  if (!text.trim()) warnings.push('No machine-readable profile text was found.')
+  if (!positions.length) warnings.push('No dated experience positions were detected.')
+  if (education.some(x => x.review_suggested)) warnings.push('One or more education fields need review.')
+  return {claims: profileClaims, currentTitle, headline, currentCompany, location, about, skills, certifications, activities, positions, education, themes, keywords, works, warnings}
+}
+
+export function researchQueries(profile: ProfileExtraction, name: string): string[] {
+  const base = [name, profile.currentCompany].filter(Boolean).join(' ')
+  const terms = ['publication','patent','conference','webinar','analytical','quality','CMC','impurity','degradation','stability','method validation']
+  return [...new Set(terms.map(term => `${base} ${term}`)), ...profile.positions.slice(1, 4).flatMap(position => terms.slice(0, 4).map(term => `${name} ${position.company_name || ''} ${term}`))].filter(query => query.trim().split(/\s+/).length >= 2).slice(0, 20)
+}
+
+export async function extractPdfText(buffer: ArrayBuffer): Promise<PdfTextExtraction> {
+  const warnings: string[] = []
+  try {
+    const pdfjs: any = await import('pdfjs-dist/legacy/build/pdf.mjs')
+    const document = await pdfjs.getDocument({data: new Uint8Array(buffer), disableWorker: true}).promise
+    const pages: string[] = []
+    for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber++) {
+      const page = await document.getPage(pageNumber); const content = await page.getTextContent();
+      const items = (content.items || []).filter((item: any) => typeof item.str === 'string')
+      const lines: string[] = []; let lastY: number | null = null; let current = ''
+      for (const item of items) { const y = Array.isArray(item.transform) ? item.transform[5] : null; if (lastY !== null && y !== null && Math.abs(y - lastY) > 2) { if (current.trim()) lines.push(current.trim()); current = '' } current += (current ? ' ' : '') + item.str; if (y !== null) lastY = y }
+      if (current.trim()) lines.push(current.trim()); pages.push(lines.join('\n'))
+    }
+    const text = pages.join('\n\n').replace(/[ \t]+\n/g, '\n').trim()
+    if (text.length < 40) warnings.push('Very little machine-readable text was found. Try Paste LinkedIn Text.')
+    return {text, pages: document.numPages, warnings}
+  } catch (error) {
+    warnings.push('The PDF could not be read as machine-readable text. Try Paste LinkedIn Text.')
+    return {text: '', pages: 0, warnings}
+  }
+}
 export type ResearchState = 'UNRESEARCHED'|'PARTIAL'|'RESEARCHED'|'DEEP PROFILE'
 export function researchCompleteness(intel: ContactIntelligence, contact: { profile_url?: string | null; email?: string | null; phone?: string | null; current_status?: string | null }) {
   const used = intel.sources.filter(s => s.status === 'USED').length
