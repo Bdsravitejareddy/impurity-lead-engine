@@ -10,6 +10,7 @@ import { oauthRedirectUrl } from './lib/oauthRedirect';
 import { formatRefreshTime, contactId } from './lib/logic';
 import { researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText } from './data/contactIntelligence';
 import ProfileImportDialog from './components/ProfileImportDialog';
+import { normalizeProfileRows } from './data/profilePersistence';
 
 type Contact={id?:string;name:string;title?:string;function?:string;email?:string|null;email_status?:string;current_status?:string;mailbox_verified?:boolean;phone?:string|null;profile_url?:string;role_fit_score?:number;confidence?:number;evidence_urls?:string[];evidence?:any[];why?:string;recommended_channel?:string;professional_themes?:string[];career?:string[];technical_evidence?:string[];jtbd?:string[];intelligence?:any};
 type Lead={account:any;opportunity:any;evidence:any[];contacts:Contact[];person_intelligence:any;outreach:any};
@@ -53,45 +54,50 @@ function Contact360({contact,company,leads,onBack}:{contact:Contact;company:stri
  const hashText=(value:string)=>{let hash=2166136261; for(let i=0;i<value.length;i++){hash^=value.charCodeAt(i);hash=Math.imul(hash,16777619)} return (hash>>>0).toString(16)};
  const ingestProfile=async(url:string,raw:string,kind:string)=>{if(!supabase||!contact.id)return; setSourceBusy(true); const before=completeness.score; const run=await supabase.from('contact_research_runs').insert({contact_id:contact.id,status:'RUNNING',queries_executed:0,sources_discovered:1}).select('id').single(); const runId=run.data?.id; const profile=extractProfessionalProfile(raw,contact.name); const blocked=!raw && /linkedin\.com/i.test(url); const state=blocked?'BLOCKED_AUTH':profile.claims.length?'USED':'PENDING_REVIEW'; const sourceUrlFinal=url||('manual://'+contact.id+'/'+Date.now()); const previous=await supabase.from('contact_sources').select('id,status').eq('contact_id',contact.id).eq('url',sourceUrlFinal).maybeSingle(); const source=await supabase.from('contact_sources').upsert({contact_id:contact.id,url:sourceUrlFinal,title:kind==='PROFESSIONAL_PROFILE'?'Professional profile input':'Supplied professional source',source_type:kind,status:state,source_kind:'MANUAL_SUPPLIED',source_description:'Manually supplied professional source',content_hash:raw?hashText(raw):null,processing_status:blocked?'BLOCKED_AUTH':raw?'COMPLETED':'PENDING_REVIEW',raw_content:raw||null,extraction_json:profile,why_used:profile.claims.length?'Structured profile facts extracted':'No structured facts extracted yet',rejection_reason:blocked?'Public LinkedIn retrieval requires authentication; paste profile text or upload an export.':null,fetched_at:raw?new Date().toISOString():null},{onConflict:'contact_id,url'}).select('id').single(); const sourceId=source.data?.id; if(raw&&previous.data?.status==='BLOCKED_AUTH'&&sourceId) await supabase.from('contact_history').insert({contact_id:contact.id,entity_type:'contact_source',entity_id:sourceId,field_name:'processing_status',old_value:{status:'BLOCKED_AUTH'},new_value:{status:'CONTENT_SUPPLIED'},change_origin:'MANUAL',reason:'Profile content supplied for previously blocked professional URL',source_id:sourceId}); if(raw&&sourceId){ if(profile.claims.length) await supabase.from('contact_claims').insert(profile.claims.map(claim_text=>({contact_id:contact.id,claim_type:'PROFILE_FACT',claim_text,provenance:'OBSERVED',confidence:0.78,source_ids:[sourceId]}))); if(profile.positions.length) await supabase.from('contact_positions').insert(profile.positions.map(p=>({...p,contact_id:contact.id,source_ids:[sourceId]}))); if(profile.education.length) await supabase.from('contact_education').insert(profile.education.map(e=>({...e,contact_id:contact.id,source_ids:[sourceId]}))); if(profile.works.length) await supabase.from('contact_works').insert(profile.works.map(w=>({...w,contact_id:contact.id,source_ids:[sourceId]}))); if(profile.themes.length) await supabase.from('contact_themes').upsert(profile.themes.map(theme=>({contact_id:contact.id,theme,evidence_count:1,confidence:0.65,source_ids:[sourceId]})),{onConflict:'contact_id,theme'}); } const queries=researchQueries(profile,contact.name); if(runId) await supabase.from('contact_research_runs').update({status:blocked?'PARTIAL':'COMPLETED',completed_at:new Date().toISOString(),queries_executed:queries.length,sources_discovered:1,sources_inspected:1,sources_used:profile.claims.length?1:0,blocked_sources:blocked?1:0,new_claims:profile.claims.length,new_positions:profile.positions.length,new_education:profile.education.length,new_works:profile.works.length,new_themes:profile.themes.length,completeness_before:before,completeness_after:Math.min(100,before+Math.round(profile.claims.length?25:0))}).eq('id',runId); setSourceDialog(false); setSourceText(''); setSourceUrl(''); setMessage(blocked?'LinkedIn could not be fetched automatically. Paste profile text or upload a LinkedIn PDF/export.':'Profile ingestion complete: '+profile.claims.length+' facts, '+queries.length+' research queries.'); setSourceBusy(false); };
  const saveProfileImport=async(payload:any)=>{
-  if(!supabase||!contact.id){setMessage('Profile import requires live Supabase');return}
-  setSourceBusy(true);
+  if(!supabase||!contact.id) throw new Error('Live Supabase access is required to save a profile.')
+  setSourceBusy(true)
+  const write=async(label:string, result:any)=>{if(result?.error) throw new Error(`${label}: ${result.error.message||'Supabase request failed'}`); return result}
+  const safeDate=(value:any)=>{if(!value)return null;const text=String(value).trim();if(/^\d{4}$/.test(text))return text+'-01-01';if(/^\d{4}[-/]\d{1,2}([-/]\d{1,2})?$/.test(text)){const parts=text.split(/[-\/]/).map(Number);return parts.length===2?`${parts[0]}-${String(parts[1]).padStart(2,'0')}-01`:`${parts[0]}-${String(parts[1]).padStart(2,'0')}-${String(parts[2]).padStart(2,'0')}`}return null}
+  let profileSaved=false
   try {
-    const profile=payload.profile;
-    const sourceUrlFinal=(payload.url||'').trim()||('manual://'+contact.id+'/'+Date.now());
-    const hash=payload.raw?hashText(payload.raw):null;
-    const previous=await supabase.from('contact_sources').select('id,status,content_hash').eq('contact_id',contact.id).eq('url',sourceUrlFinal).maybeSingle();
-    const source=await supabase.from('contact_sources').upsert({
+    const profile=payload.profile
+    const sourceUrlFinal=(payload.url||'').trim()||('manual://'+contact.id+'/'+(hash||Date.now()))
+    const hash=payload.raw?hashText(payload.raw):null
+    const previous=await write('Check existing source',await supabase.from('contact_sources').select('id,status,content_hash').eq('contact_id',contact.id).eq('url',sourceUrlFinal).maybeSingle())
+    const source=await write('Save supplied source',await supabase.from('contact_sources').upsert({
       contact_id:contact.id,url:sourceUrlFinal,title:payload.filename?('Supplied professional profile — '+payload.filename):'Supplied professional profile',publisher:'User supplied',source_type:'PROFESSIONAL_PROFILE',source_kind:'USER_SUPPLIED_PROFESSIONAL_SOURCE',source_description:payload.filename?('Supplied file: '+payload.filename):'Pasted or manually entered professional profile',raw_content:payload.raw||null,extraction_json:profile,content_hash:hash,status:profile.claims?.length?'USED':'PENDING_REVIEW',processing_status:'COMPLETED',why_used:profile.claims?.length?'Structured professional facts extracted from supplied content':'No structured facts extracted yet',rejection_reason:null,fetched_at:new Date().toISOString()
-    },{onConflict:'contact_id,url'}).select('id').single();
-    if(source.error||!source.data?.id) throw source.error||new Error('Could not save supplied source');
-    const sourceId=source.data.id;
-    const safeDate=(value:any)=>{if(!value)return null;const text=String(value).trim();if(/^\d{4}$/.test(text))return text+'-01-01';if(/^\d{4}[-/]\d{1,2}([-/]\d{1,2})?$/.test(text)){const parts=text.split(/[-\/]/).map(Number);return parts.length===2?`${parts[0]}-${String(parts[1]).padStart(2,'0')}-01`:`${parts[0]}-${String(parts[1]).padStart(2,'0')}-${String(parts[2]).padStart(2,'0')}`}return null};
-    if(previous.data?.status==='BLOCKED_AUTH'&&payload.raw){await supabase.from('contact_history').insert({contact_id:contact.id,entity_type:'contact_source',entity_id:sourceId,field_name:'status',old_value:{status:'BLOCKED_AUTH'},new_value:{status:'USED'},change_origin:'MANUAL',reason:'Profile content supplied for previously blocked professional URL',source_id:sourceId})}
-    const claimTexts=[...(profile.claims||[])];
-    if(profile.headline) claimTexts.push('Professional headline: '+profile.headline);
-    if(profile.about) claimTexts.push('Professional summary: '+profile.about);
-    if(profile.currentTitle) claimTexts.push('Current title: '+profile.currentTitle);
-    if(profile.currentCompany) claimTexts.push('Current company: '+profile.currentCompany);
-    if(profile.location) claimTexts.push('Professional location: '+profile.location);
-    if(profile.skills?.length) claimTexts.push('Explicit skills: '+profile.skills.join(', '));
-    if(claimTexts.length) await supabase.from('contact_claims').insert(claimTexts.map((claim_text:string)=>({contact_id:contact.id,claim_type:'SUPPLIED_PROFILE_FACT',claim_text,provenance:'OBSERVED',confidence:0.78,source_ids:[sourceId]})));
-    if(profile.positions?.length) await supabase.from('contact_positions').insert(profile.positions.filter((x:any)=>x.title||x.company_name).map((x:any)=>({...x,contact_id:contact.id,start_date:safeDate(x.start_date),end_date:safeDate(x.end_date),source_ids:[sourceId],attribution:x.attribution||'PERSON_DIRECT'})));
-    if(profile.education?.length) await supabase.from('contact_education').insert(profile.education.filter((x:any)=>x.institution).map((x:any)=>({...x,contact_id:contact.id,start_date:safeDate(x.start_date),end_date:safeDate(x.end_date),source_ids:[sourceId]})));
-    const allWorks=[...(profile.works||[]),...(profile.activities||[])];
-    if(profile.certifications?.length) allWorks.push(...profile.certifications.filter((x:any)=>x.name).map((x:any)=>({title:x.name,work_type:'CERTIFICATION',work_date:x.issue_date||null,topic:x.issuer||'Professional certification',attribution:'PERSON_DIRECT',confidence:x.confidence||0.7,source_ids:[sourceId]})));
-    if(allWorks.length) await supabase.from('contact_works').insert(allWorks.filter((x:any)=>x.title).map((x:any)=>({...x,contact_id:contact.id,work_date:safeDate(x.work_date),source_ids:[sourceId],attribution:x.attribution||'PERSON_DIRECT'})));
-    if(profile.themes?.length) await supabase.from('contact_themes').upsert(profile.themes.map((theme:string)=>({contact_id:contact.id,theme,evidence_count:1,confidence:0.65,source_ids:[sourceId]})),{onConflict:'contact_id,theme'});
-    const updates:any={};
-    if(payload.name && payload.name!==contact.name) updates.display_name=payload.name;
-    if(profile.currentTitle) updates.title=profile.currentTitle;
-    if(profile.currentCompany&&!contact.function) updates.department=profile.currentCompany;
-    if(payload.url) updates.profile_url=payload.url;
-    if(Object.keys(updates).length){for(const [field,value] of Object.entries(updates)){const oldValue=(contact as any)[field]||null;if(oldValue!==value) await supabase.from('contact_history').insert({contact_id:contact.id,entity_type:'contact',entity_id:contact.id,field_name:field,old_value:{value:oldValue},new_value:{value},change_origin:'MANUAL',reason:'Accepted supplied professional profile',source_id:sourceId})} await supabase.from('contacts').update(updates).eq('id',contact.id)}
-    const queries=researchQueries(profile,payload.name||contact.name);
-    if(payload.research) await supabase.from('contact_research_runs').insert({contact_id:contact.id,status:'QUEUED',queries_executed:0,sources_discovered:0,sources_inspected:0,sources_used:0,completeness_before:completeness.score,completeness_after:Math.min(100,completeness.score+(claimTexts.length?20:0))});
-    setProfileImporter(false); setMessage(payload.research?'Profile saved. Research queued with '+queries.length+' bounded queries.':'Profile saved.');
-    window.location.reload();
-  } catch(error){setMessage(error instanceof Error?error.message:'Profile import failed')} finally {setSourceBusy(false)}
+    },{onConflict:'contact_id,url'}).select('id').single())
+    const sourceId=source.data.id
+    const sameSource=Boolean(previous.data?.content_hash&&hash&&previous.data.content_hash===hash)
+    if(previous.data?.status==='BLOCKED_AUTH'&&payload.raw) await write('Record supplied content transition',await supabase.from('contact_history').insert({contact_id:contact.id,entity_type:'contact_source',entity_id:sourceId,field_name:'status',old_value:{status:'BLOCKED_AUTH'},new_value:{status:'USED'},change_origin:'MANUAL',reason:'Profile content supplied for previously blocked professional URL',source_id:sourceId}))
+    const rows=normalizeProfileRows(profile,contact.id,sourceId,safeDate)
+    if(!sameSource){
+      if(rows.claims.length) await write('Save profile claims',await supabase.from('contact_claims').insert(rows.claims))
+      if(rows.positions.length) await write('Save career positions',await supabase.from('contact_positions').insert(rows.positions))
+      if(rows.education.length) await write('Save education',await supabase.from('contact_education').insert(rows.education))
+      if(rows.works.length) await write('Save professional work',await supabase.from('contact_works').insert(rows.works))
+      if(rows.themes.length) await write('Save professional themes',await supabase.from('contact_themes').upsert(rows.themes,{onConflict:'contact_id,theme'}))
+    }
+    const updates:any={}
+    if(payload.name && payload.name!==contact.name) updates.display_name=payload.name
+    if(profile.currentTitle) updates.title=profile.currentTitle
+    if(profile.currentCompany&&!contact.function) updates.department=profile.currentCompany
+    if(payload.url) updates.profile_url=payload.url
+    if(Object.keys(updates).length){for(const [field,value] of Object.entries(updates)){const oldValue=(contact as any)[field]||null;if(oldValue!==value) await write('Record profile history',await supabase.from('contact_history').insert({contact_id:contact.id,entity_type:'contact',entity_id:contact.id,field_name:field,old_value:{value:oldValue},new_value:{value},change_origin:'MANUAL',reason:'Accepted supplied professional profile',source_id:sourceId}))} await write('Save contact profile',await supabase.from('contacts').update(updates).eq('id',contact.id))}
+    profileSaved=true
+    const queries=researchQueries(profile,payload.name||contact.name)
+    if(payload.research){
+      const existing=await write('Check queued research',await supabase.from('contact_research_runs').select('id').eq('contact_id',contact.id).eq('status','QUEUED').limit(1))
+      if(!existing.data?.length) await write('Queue contact research',await supabase.from('contact_research_runs').insert({contact_id:contact.id,status:'QUEUED',queries_executed:0,sources_discovered:0,sources_inspected:0,sources_used:0,completeness_before:completeness.score,completeness_after:Math.min(100,completeness.score+(rows.claims.length?20:0))}))
+    }
+    setProfileImporter(false)
+    setMessage(payload.research?'PROFILE SAVED · RESEARCH QUEUED':'PROFILE SAVED')
+    window.location.reload()
+  } catch(error) {
+    const message=error instanceof Error?error.message:'Profile could not be saved.'
+    setMessage(profileSaved && payload.research ? 'PROFILE SAVED · RESEARCH QUEUE FAILED' : message)
+    throw new Error(profileSaved && payload.research ? `Profile saved, but research could not be queued: ${message}. Retry research from Contact 360.` : `Profile could not be saved: ${message}`)
+  } finally { setSourceBusy(false) }
  };
  const addSource=async()=>{if(!supabase||!contact.id){setMessage('Adding sources requires live Supabase');return} setSourceDialog(true);};
  const submitSource=async()=>{if(!sourceUrl.trim()&&!sourceText.trim()){setMessage('Add a URL or paste source text');return} let raw=sourceText.trim(); if(sourceUrl.trim()&&!raw){try { const response=await fetch(sourceUrl.trim(),{mode:'cors'}); if(response.ok) raw=await response.text(); } catch { raw=''; }} await ingestProfile(sourceUrl.trim(),raw,sourceKind==='LinkedIn profile'?'PROFESSIONAL_PROFILE':sourceKind==='Other professional source'?'OTHER_PUBLIC':sourceKind.toUpperCase().replace(/\s+\/\s+|\s+/g,'_')); };

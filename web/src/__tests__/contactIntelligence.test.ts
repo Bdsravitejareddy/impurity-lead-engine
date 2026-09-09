@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { dedupeSources, normalizeContactIntelligence, sourceCoverage, researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText, isSuspiciousExtractedField } from '../data/contactIntelligence'
+import { normalizeProfileRows } from '../data/profilePersistence'
 
 describe('contact intelligence normalization', () => {
   it('deduplicates a source URL while retaining status', () => {
@@ -45,6 +46,16 @@ describe('contact intelligence normalization', () => {
     expect(isSuspiciousExtractedField('MSc Chemistry')).toBe(false)
     const profile = extractProfessionalProfile('Education\nMaster be UCS $ / >> P from University of Mumbai', 'Example')
     expect(profile.education[0]?.review_suggested).toBe(true)
+  })
+  it('normalizes profile writes to the production schema and excludes parser-only fields', () => {
+    const profile = extractProfessionalProfile('Education\nMaster of Pharmacy from University of Mumbai\nExperience\n2022 - Present: Quality Director at Cipla\nProjects\nStability method validation', 'Example')
+    profile.education.push({ institution: 'Noisy', degree: 'be UCS $ / >> P', confidence: 0.2, review_suggested: true })
+    profile.works.push({ title: 'Project', work_type: 'PROJECT', url: 'https://example.test', attribution: 'PERSON_DIRECT', confidence: 0.7 })
+    const rows = normalizeProfileRows(profile, 'contact-1', 'source-1', value => /^\d{4}$/.test(String(value || '')) ? `${value}-01-01` : null)
+    expect(rows.education.every(row => !('review_suggested' in row))).toBe(true)
+    expect(rows.education.some(row => row.institution === 'Noisy')).toBe(false)
+    expect(rows.works.every(row => !('url' in row))).toBe(true)
+    expect(rows.works[0]).toMatchObject({ contact_id: 'contact-1', source_ids: ['source-1'] })
   })
   it('structures a messy full-profile export without turning navigation text into work', () => {
     const profile = extractProfessionalProfile(`
