@@ -145,3 +145,12 @@ The next safe step is to run an authenticated browser acceptance pass against `h
 - LinkedIn/public-profile fetch failures use `BLOCKED_AUTH`; `INSPECTED` is no longer the final disposition for processed supplied sources.
 - Source register shows extraction counts and supports filtering blocked/pending/used/rejected states.
 - Latest production deployment: `https://98f0b4ec.svak-intelligence.pages.dev`; alias `https://svak-intelligence.pages.dev`.
+
+## Contact research worker update (2026-09-09)
+
+- Added `src/impurity_leads/contact_research.py`, a backend-only, bounded worker that consumes `QUEUED` `contact_research_runs` rows after the daily crawl. It uses the generated profile keywords and executes deduplicated, capped public Europe PMC queries (maximum 20 queries and 5 results per query).
+- Each discovered publication is identity-checked against the contact name. Sources finish as `USED`, `REJECTED`, or `FAILED`; rejection reasons and identity confidence are retained in `contact_sources`. Duplicate publication URLs are skipped within a run.
+- High-confidence technical matches persist source-linked person-direct works and observed claims. Conservative inferred problems, themes, and JTBD hypotheses are only generated from explicit technical language in the matched source and remain provenance-linked.
+- `contact_research_runs` now records rejected and failed source counts. The daily GitHub Actions crawler invokes the worker with the existing backend-only `SUPABASE_SECRET_KEY`; no privileged credential is exposed to the frontend.
+- The Contact 360 Overview now displays query/source disposition and enrichment metrics, and the Sources tab supports source-type and terminal-status filters.
+- Current limitation: this first worker stage has a Europe PMC adapter only. Official-company, patent, conference, regulatory, and broad-web adapters are not yet implemented; queued runs therefore provide bounded scientific-publication corroboration rather than exhaustive web research. Production execution requires the existing scheduled GitHub Actions job with its configured backend secret.
