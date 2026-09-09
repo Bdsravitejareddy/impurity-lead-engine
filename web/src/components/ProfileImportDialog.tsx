@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { extractPdfText, extractProfessionalProfile, type ProfileExtraction } from '../data/contactIntelligence'
 
 type Props = {
@@ -65,7 +66,7 @@ export default function ProfileImportDialog({ contactName, onClose, onSave }: Pr
   }
   const summary = useMemo(() => `${profile.positions.length} positions · ${profile.education.length} education records · ${profile.works.length} works · ${(profile.certifications || []).length} certifications`, [profile])
 
-  return <div className="source-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="profile-import-title">
+  return createPortal(<div className="source-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="profile-import-title">
     <div className="profile-import-modal" ref={dialogRef} tabIndex={-1}>
       <div className="profile-import-header">
         <div className="panelhead"><div><span className="eyebrow">CONTACT 360 / PROFILE INGESTION</span><h2 id="profile-import-title">Import professional profile</h2><p className="muted">Supply the profile once. PDF, pasted text and manual entries use the same normalized intelligence model.</p></div><button className="icon" onClick={onClose} aria-label="Close profile import">×</button></div>
@@ -84,5 +85,5 @@ export default function ProfileImportDialog({ contactName, onClose, onSave }: Pr
       </div>
       <div className="profile-import-footer"><span className="muted">{summary}</span><div className="source-modal-actions"><button className="refresh" onClick={() => submit(false)} disabled={parsing}>Save profile only</button><button className="primary" onClick={() => submit(true)} disabled={parsing}>{parsing ? 'Saving…' : 'Save & research'}</button></div></div>
     </div>
-  </div>
+  </div>, document.body)
 }
