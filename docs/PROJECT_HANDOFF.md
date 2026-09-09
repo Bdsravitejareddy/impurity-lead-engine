@@ -163,3 +163,4 @@ The next safe step is to run an authenticated browser acceptance pass against `h
 - A blocked LinkedIn URL can be supplied later with profile text while retaining the same canonical source URL. The transition is recorded in `contact_history`, and the supplied content is parsed into the existing Contact 360 model.
 - Acceptance tests cover Vijayasarathi Ramaswami vs Vijayasarathi R with Cipla/Global Quality context and Jitendra Singh common-name collision protection.
 - Contextual-resolution deployment: `https://ad29ba3e.svak-intelligence.pages.dev`; production alias serves `assets/index-YJ8Eo1QE.js` and returned HTTP 200 for `/` and `/contacts`.
+- Alias correction: `name_variants` now emits `vijayasarathi ramaswami`, `vijayasarathi R`, `V Ramaswami`, and `V. Ramaswami`; redundant middle-initial combinations are suppressed. Full backend validation remains `226 passed`; integration remains `14 passed`; frontend remains `26 passed`.
