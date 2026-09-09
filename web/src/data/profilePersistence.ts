@@ -8,6 +8,21 @@ export type ProfileRows = {
   themes: any[]
 }
 
+function hashText(value: string): string {
+  let hash = 2166136261
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16)
+}
+
+/** Builds the stable source identity used for manually supplied profiles. */
+export function profileSourceKey(contactId: string, url: string | undefined, raw: string | undefined, now = Date.now()): string {
+  const hash = raw ? hashText(raw) : null
+  return (url || '').trim() || ('manual://' + contactId + '/' + (hash || now))
+}
+
 export function normalizeProfileRows(profile: ProfileExtraction, contactId: string, sourceId: string, safeDate: (value: unknown) => string | null): ProfileRows {
   const claims = [...(profile.claims || [])]
   if (profile.headline) claims.push(`Professional headline: ${profile.headline}`)

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { dedupeSources, normalizeContactIntelligence, sourceCoverage, researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText, isSuspiciousExtractedField } from '../data/contactIntelligence'
-import { normalizeProfileRows } from '../data/profilePersistence'
+import { normalizeProfileRows, profileSourceKey } from '../data/profilePersistence'
 
 describe('contact intelligence normalization', () => {
   it('deduplicates a source URL while retaining status', () => {
@@ -56,6 +56,12 @@ describe('contact intelligence normalization', () => {
     expect(rows.education.some(row => row.institution === 'Noisy')).toBe(false)
     expect(rows.works.every(row => !('url' in row))).toBe(true)
     expect(rows.works[0]).toMatchObject({ contact_id: 'contact-1', source_ids: ['source-1'] })
+  })
+  it('executes source-key generation after hashing supplied profile content', () => {
+    const key = profileSourceKey('contact-1', '', 'Vijayasarathi Ramaswami profile', 123)
+    expect(key).toMatch(/^manual:\/\/contact-1\/[0-9a-f]+$/)
+    expect(profileSourceKey('contact-1', 'https://example.com/profile', 'profile', 123)).toBe('https://example.com/profile')
+    expect(profileSourceKey('contact-1', '  ', '', 123)).toBe('manual://contact-1/123')
   })
   it('structures a messy full-profile export without turning navigation text into work', () => {
     const profile = extractProfessionalProfile(`

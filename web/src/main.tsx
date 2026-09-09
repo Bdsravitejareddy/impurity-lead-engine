@@ -10,7 +10,7 @@ import { oauthRedirectUrl } from './lib/oauthRedirect';
 import { formatRefreshTime, contactId } from './lib/logic';
 import { researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText } from './data/contactIntelligence';
 import ProfileImportDialog from './components/ProfileImportDialog';
-import { normalizeProfileRows } from './data/profilePersistence';
+import { normalizeProfileRows, profileSourceKey } from './data/profilePersistence';
 
 type Contact={id?:string;name:string;title?:string;function?:string;email?:string|null;email_status?:string;current_status?:string;mailbox_verified?:boolean;phone?:string|null;profile_url?:string;role_fit_score?:number;confidence?:number;evidence_urls?:string[];evidence?:any[];why?:string;recommended_channel?:string;professional_themes?:string[];career?:string[];technical_evidence?:string[];jtbd?:string[];intelligence?:any};
 type Lead={account:any;opportunity:any;evidence:any[];contacts:Contact[];person_intelligence:any;outreach:any};
@@ -61,8 +61,8 @@ function Contact360({contact,company,leads,onBack}:{contact:Contact;company:stri
   let profileSaved=false
   try {
     const profile=payload.profile
-    const sourceUrlFinal=(payload.url||'').trim()||('manual://'+contact.id+'/'+(hash||Date.now()))
     const hash=payload.raw?hashText(payload.raw):null
+    const sourceUrlFinal=profileSourceKey(contact.id,payload.url,payload.raw)
     const previous=await write('Check existing source',await supabase.from('contact_sources').select('id,status,content_hash').eq('contact_id',contact.id).eq('url',sourceUrlFinal).maybeSingle())
     const source=await write('Save supplied source',await supabase.from('contact_sources').upsert({
       contact_id:contact.id,url:sourceUrlFinal,title:payload.filename?('Supplied professional profile — '+payload.filename):'Supplied professional profile',publisher:'User supplied',source_type:'PROFESSIONAL_PROFILE',source_kind:'USER_SUPPLIED_PROFESSIONAL_SOURCE',source_description:payload.filename?('Supplied file: '+payload.filename):'Pasted or manually entered professional profile',raw_content:payload.raw||null,extraction_json:profile,content_hash:hash,status:profile.claims?.length?'USED':'PENDING_REVIEW',processing_status:'COMPLETED',why_used:profile.claims?.length?'Structured professional facts extracted from supplied content':'No structured facts extracted yet',rejection_reason:null,fetched_at:new Date().toISOString()
