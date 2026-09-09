@@ -36,9 +36,12 @@ def name_variants(name: str) -> list[str]:
     if not tokens:
         return []
     first, last = tokens[0], tokens[-1]
-    variants = [" ".join(tokens), f"{first} {last[0].upper()}", f"{first[0].upper()} {last.title()}"]
-    if len(tokens) > 2:
-        variants.append(f"{first} {tokens[1][0].upper()} {last}")
+    variants = [
+        " ".join(tokens),
+        f"{first} {last[0].upper()}",
+        f"{first[0].upper()} {last.title()}",
+        f"{first[0].upper()}. {last.title()}",
+    ]
     return list(dict.fromkeys(variants))
 
 
@@ -82,6 +85,7 @@ def resolve_identity(contact: dict[str, Any], candidate: dict[str, Any]) -> dict
     """
     canonical = str(contact.get("display_name") or contact.get("name") or "")
     observed = str(candidate.get("displayName") or candidate.get("name") or candidate.get("authorString") or "")
+    expected = _name_tokens(canonical)
     name_score, evidence = _name_compatibility(canonical, observed)
     expected_company = " ".join(str(contact.get(key) or "") for key in ("company", "company_name", "employer")).casefold()
     observed_company = " ".join(str(candidate.get(key) or "") for key in ("company", "company_name", "employer", "institution")).casefold()
@@ -102,7 +106,10 @@ def resolve_identity(contact: dict[str, Any], candidate: dict[str, Any]) -> dict
     score = 35 * name_score + (25 if company_match else 0) + (20 if role_match else 0) + (10 if location_match else 0)
     # Full-name matches still need context for confirmation; abbreviated names
     # with company and role context can be probable/confirmed safely.
-    if name_score >= 0.78 and company_match and role_match and score >= 70:
+    common_name = (expected and (expected[0] in _GENERIC_FIRST_NAMES or expected[-1] in _GENERIC_FIRST_NAMES))
+    if common_name and not (company_match and role_match):
+        state = "NEEDS_REVIEW" if name_score >= 0.78 and (company_match or role_match) else "REJECTED_MATCH"
+    elif name_score >= 0.78 and company_match and role_match and score >= 70:
         state = "CONFIRMED_MATCH"
     elif name_score >= 0.78 and (company_match or role_match) and score >= 50:
         state = "PROBABLE_MATCH"

@@ -23,6 +23,8 @@ def test_common_name_requires_context_and_does_not_merge_on_name_only():
     result = resolve_identity({"display_name": "Jitendra Singh", "company": "Cipla"}, {"displayName": "Jitendra Singh", "company": "Unrelated Pharma"})
     assert result["state"] == "REJECTED_MATCH"
     assert result["confidence"] < 50
+    same_company_without_role = resolve_identity({"display_name": "Jitendra Singh", "company": "Cipla"}, {"displayName": "Jitendra Singh", "company": "Cipla"})
+    assert same_company_without_role["state"] == "NEEDS_REVIEW"
 
 
 def test_name_variants_are_bounded_and_useful():
@@ -30,6 +32,8 @@ def test_name_variants_are_bounded_and_useful():
     assert "vijayasarathi ramaswami" in variants
     assert "vijayasarathi R" in variants
     assert "V Ramaswami" in variants
+    assert "V. Ramaswami" in variants
+    assert "vijayasarathi R Ramaswami" not in variants
     assert len(variants) <= 4
 
 
