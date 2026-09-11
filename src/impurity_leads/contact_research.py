@@ -15,6 +15,7 @@ from urllib.request import Request, urlopen
 
 from impurity_leads.contacts.normalize import normalize_person_name
 from impurity_leads.research_graph import publication_graph_entities
+from impurity_leads.contact_quality import QualityConfig, portfolio_quality
 
 EUROPE_PMC = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 TECHNICAL_TERMS = ("analytical", "quality", "impurity", "degradation", "stability", "method", "regulatory", "cmc", "api", "validation")
@@ -302,6 +303,32 @@ def _graph_claims(text: str, *, source_id: str, source_url: str, entity_id: str 
     return rows
 
 
+def _portfolio_snapshot(client: Any, settings: Any) -> dict[str, Any]:
+    """Calculate the backend-authoritative gate from canonical contacts."""
+    try:
+        rows = client.table("contacts").select("*").execute().data or []
+        source_rows = client.table("contact_sources").select("*").execute().data or []
+        source_classes: dict[str, set[str]] = {}
+        for source in source_rows:
+            source_classes.setdefault(str(source.get("contact_id")), set()).add(str(source.get("source_type") or source.get("source_kind") or "OTHER"))
+        for row in rows:
+            row["source_classes"] = list(source_classes.get(str(row.get("id")), set()))
+        duplicate_count = 0
+        config = QualityConfig(
+            daily_contact_target=getattr(settings, "daily_contact_target", 10),
+            min_contact_quality=getattr(settings, "min_contact_quality", 70),
+            min_identity_confidence=getattr(settings, "min_identity_confidence", 70),
+            min_technical_relevance=55,
+            min_median_quality=getattr(settings, "min_median_quality", 72),
+            min_identity_coverage=getattr(settings, "min_identity_coverage", 0.80),
+            min_technical_coverage=getattr(settings, "min_technical_coverage", 0.70),
+            max_duplicate_rate=getattr(settings, "max_duplicate_rate", 0.15),
+        )
+        return portfolio_quality(rows, duplicate_count=duplicate_count, config=config)
+    except Exception:
+        return {"gate_passed": False, "ai_mode": "TARGETED_SEARCH", "reason_for_ai_escalation": "quality snapshot unavailable"}
+
+
 def run_pending_contact_research(settings, *, limit: int = 10, fetcher: Callable[[str], dict[str, Any]] = _get_json) -> dict[str, Any]:
     """Process queued contact research runs using the backend-only Supabase key."""
     if not settings.supabase_url or not settings.supabase_secret_key:
@@ -398,7 +425,9 @@ def run_pending_contact_research(settings, *, limit: int = 10, fetcher: Callable
                         rejected += 1
             completed_status = "COMPLETED" if inspected else "PARTIAL"
             now = datetime.now(timezone.utc).isoformat()
-            client.table("contact_research_runs").update({"status": completed_status, "completed_at": now, "queries_executed": len(queries), "sources_discovered": discovered, "sources_inspected": inspected, "sources_used": used, "sources_rejected": rejected, "sources_failed": failed, "new_claims": claims, "new_works": works, "new_problems": problems, "new_themes": themes, "new_jtbd": jtbd, "blocked_sources": 0}).eq("id", run_id).execute()
+            quality = _portfolio_snapshot(client, settings)
+            client.table("contact_research_runs").update({"status": completed_status, "completed_at": now, "queries_executed": len(queries), "sources_discovered": discovered, "sources_inspected": inspected, "sources_used": used, "sources_rejected": rejected, "sources_failed": failed, "new_claims": claims, "new_works": works, "new_problems": problems, "new_themes": themes, "new_jtbd": jtbd, "blocked_sources": 0, "quality_metrics": quality, "ai_mode": quality.get("ai_mode"), "reason_for_ai_escalation": quality.get("reason_for_ai_escalation")}).eq("id", run_id).execute()
+            totals["quality"] = quality
             totals.update(processed=totals["processed"] + 1, queries=totals["queries"] + len(queries), sources=totals["sources"] + inspected, used=totals["used"] + used, rejected=totals["rejected"] + rejected, failed=totals["failed"] + failed, works=totals["works"] + works, conflicts=totals["conflicts"])
         except Exception as exc:
             client.table("contact_research_runs").update({"status": "FAILED", "completed_at": datetime.now(timezone.utc).isoformat(), "error": str(exc)[:500], "error_code": "WORKER_ERROR"}).eq("id", run_id).execute()

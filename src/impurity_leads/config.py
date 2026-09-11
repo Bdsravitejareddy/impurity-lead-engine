@@ -31,6 +31,21 @@ class Settings(BaseModel):
     ai_max_people_per_run: int = Field(default=10, ge=0, le=100)
     ai_max_input_chars_per_document: int = Field(default=20000, ge=1000, le=100000)
     ai_max_research_depth: int = Field(default=3, ge=0, le=3)
+    ai_web_search_enabled: bool = False
+    openai_model_routine: str = "gpt-5.6-luna"
+    openai_model_deep: str = "gpt-5.6-sol"
+    daily_contact_target: int = Field(default=10, ge=1, le=100)
+    min_contact_quality: float = Field(default=70, ge=0, le=100)
+    min_identity_confidence: float = Field(default=70, ge=0, le=100)
+    min_median_quality: float = Field(default=72, ge=0, le=100)
+    min_identity_coverage: float = Field(default=0.80, ge=0, le=1)
+    min_technical_coverage: float = Field(default=0.70, ge=0, le=1)
+    max_duplicate_rate: float = Field(default=0.15, ge=0, le=1)
+    max_ai_search_calls_per_run: int = Field(default=8, ge=0, le=50)
+    max_ai_deep_calls_per_run: int = Field(default=3, ge=0, le=20)
+    max_research_documents: int = Field(default=30, ge=1, le=200)
+    max_research_people: int = Field(default=15, ge=1, le=100)
+    min_marginal_quality_gain: float = Field(default=3, ge=0, le=100)
 
 
     @model_validator(mode='after')
@@ -45,7 +60,7 @@ class Settings(BaseModel):
 def load_settings() -> Settings:
     values = {}
     for name in Settings.model_fields:
-        env_name = name.upper() if name.startswith(('supabase_', 'openai_', 'ai_')) else 'CRAWLER_' + name.upper()
+        env_name = name.upper() if name.startswith(('supabase_', 'openai_', 'ai_', 'daily_', 'min_', 'max_')) else 'CRAWLER_' + name.upper()
         value = os.getenv(env_name)
         if value:
             values[name] = value

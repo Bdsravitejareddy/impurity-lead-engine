@@ -18,6 +18,12 @@ class ResearchBudget:
     max_documents: int = 20
     max_people: int = 20
     max_depth: int = 3
+    max_ai_analysis_calls: int = 20
+    max_ai_search_calls: int = 8
+    max_ai_deep_calls: int = 3
+    max_sources_per_person: int = 10
+    min_marginal_quality_gain: float = 3.0
+    max_run_minutes: int = 40
 
 
 def normalize_entity_name(value: str) -> str:
@@ -34,10 +40,10 @@ def bounded_query_plan(seeds: Iterable[dict[str, Any]], budget: ResearchBudget =
         kind = str(seed.get("entity_type") or "OTHER").upper(); depth = int(seed.get("depth", 0))
         if depth >= budget.max_depth: continue
         terms = [name]
-        if kind == "MOLECULE": terms += [f"{name} impurity", f"{name} degradation", f"{name} related substances", f"{name} impurity synthesis"]
+        if kind == "MOLECULE": terms += [f"{name} impurity", f"{name} degradation", f"{name} related substances", f"{name} impurity synthesis", f"{name} stability indicating", f"{name} LC-MS"]
         elif kind == "PERSON": terms += [f"{name} publication", f"{name} patent", f"{name} analytical", f"{name} conference"]
         elif kind == "COMPANY": terms += [f"{name} quality impurity", f"{name} analytical development"]
-        elif kind == "OPPORTUNITY": terms += [f"{name} technical evidence"]
+        elif kind == "OPPORTUNITY": terms += [f"{name} technical evidence", f"{name} impurity synthesis", f"{name} degradation product"]
         for query in terms:
             key = " ".join(query.casefold().split())
             if key in seen or len(planned) >= budget.max_queries: continue
@@ -64,8 +70,13 @@ def fuse_claims(claims: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             grouped[key] = {**item, "supporting_sources": [], "contradicting_sources": []}
         target = grouped[key]["contradicting_sources" if item.get("contradicts") else "supporting_sources"]
         if item.get("source_id") and item["source_id"] not in target: target.append(item["source_id"])
+        grouped[key].setdefault("supporting_classes", set()).add(str(item.get("source_class") or "UNKNOWN")) if not item.get("contradicts") else None
     for item in grouped.values():
-        item["confidence"] = min(0.99, float(item.get("confidence", 0.5)) + 0.05 * max(0, len(item["supporting_sources"]) - 1))
+        classes = item.pop("supporting_classes", set())
+        independent_bonus = min(0.20, max(0, len(classes) - 1) * 0.08)
+        contradiction_penalty = min(0.25, len(item["contradicting_sources"]) * 0.10)
+        item["confidence"] = min(0.99, max(0.0, float(item.get("confidence", 0.5)) + independent_bonus - contradiction_penalty))
+        item["source_classes"] = sorted(classes)
     return list(grouped.values())
 
 
