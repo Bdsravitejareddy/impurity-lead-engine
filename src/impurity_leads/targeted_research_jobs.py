@@ -116,11 +116,11 @@ def run_pending_targeted_jobs(settings: Any, *, limit: int = 10, provider: Disco
             continue
         opportunity = opportunity_rows[0]
         if opportunity.get("company_id"):
-            company_rows = client.table("companies").select("name").eq("id", opportunity["company_id"]).limit(1).execute().data or []
-            if company_rows: opportunity["company_name"] = company_rows[0].get("name")
+            company_rows = client.table("companies").select("legal_name,normalized_name").eq("id", opportunity["company_id"]).limit(1).execute().data or []
+            if company_rows: opportunity["company_name"] = company_rows[0].get("legal_name") or company_rows[0].get("normalized_name")
         if opportunity.get("molecule_id"):
-            molecule_rows = client.table("molecules").select("name").eq("id", opportunity["molecule_id"]).limit(1).execute().data or []
-            if molecule_rows: opportunity["molecule_name"] = molecule_rows[0].get("name")
+            molecule_rows = client.table("molecules").select("canonical_name").eq("id", opportunity["molecule_id"]).limit(1).execute().data or []
+            if molecule_rows: opportunity["molecule_name"] = molecule_rows[0].get("canonical_name")
         contacts = client.table("contacts").select("*").execute().data or []
         metrics = process_targeted_job(client, job, opportunity, contacts, provider)
         result["processed"] += 1
