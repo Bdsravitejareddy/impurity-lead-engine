@@ -1,0 +1,29 @@
+name: ingest ChatGPT Work research result
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  ingest:
+    if: github.event.issue.pull_request == null && contains(github.event.issue.body, 'SVAK_AGENT_JOB_START') && contains(github.event.comment.body, 'SVAK_WORK_RESULT_START')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: python -m pip install .
+      - name: Validate and apply staged Work result
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python scripts/process_agent_comment.py

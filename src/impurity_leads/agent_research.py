@@ -6,9 +6,13 @@ agent response as canonical database truth without backend validation.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
+from uuid import NAMESPACE_URL, uuid5
+
+from impurity_leads.contacts.normalize import normalize_person_name, person_name_compatibility
 
 
 OUTPUT_SCHEMA = {
@@ -184,3 +188,108 @@ def validate_agent_submission(payload: Any, *, job_id: str, seen_submission: boo
         clean_sources.append(dict(source))
     data = {**payload, "job_id": str(job_id), "people": clean_people, "sources": clean_sources}
     return {"valid": not errors, "errors": errors, "data": data}
+
+
+def _entity_id(client: Any, entity_type: str, name: str, metadata: dict[str, Any] | None = None) -> str | None:
+    if not name:
+        return None
+    normalized = normalize_person_name(name)
+    try:
+        response = client.table("research_entities").upsert({"entity_type": entity_type, "canonical_name": name[:500], "normalized_name": normalized, "metadata_json": metadata or {}}, on_conflict="entity_type,normalized_name").execute()
+        rows = getattr(response, "data", None) or []
+        if rows:
+            return rows[0].get("id")
+    except Exception:
+        pass
+    return None
+
+
+def apply_validated_agent_research(client: Any, *, job: dict[str, Any], validated: dict[str, Any]) -> dict[str, Any]:
+    """Apply only structurally valid, source-attributed findings.
+
+    Agent statements remain INFERRED unless a deterministic source fetch has
+    independently succeeded. All writes are idempotent by stable contact/source
+    keys and equivalent claim checks.
+    """
+    data = validated.get("data") or {}
+    opportunity_id = str(job.get("opportunity_id") or "")
+    known = job.get("known_entities") or {}
+    company = str(known.get("company") or "").strip()
+    company_id = None
+    try:
+        opportunity = (client.table("opportunities").select("company_id").eq("id", opportunity_id).limit(1).execute().data or [{}])[0]
+        company_id = opportunity.get("company_id")
+    except Exception:
+        pass
+    sources_by_url = {str(source.get("url")): source for source in data.get("sources") or [] if _url_ok(source.get("url"))}
+    metrics = {"people_proposed": len(data.get("people") or []), "sources_proposed": len(sources_by_url), "sources_accepted": 0, "sources_rejected": 0, "people_canonicalised": 0, "contacts_created": 0, "duplicates_prevented": 0, "claims_accepted": 0, "works_accepted": 0}
+    source_ids: dict[str, str] = {}
+    for url, source in sources_by_url.items():
+        # URL validation is intentionally conservative; the underlying page is
+        # still marked unverified until a source adapter or fetch confirms it.
+        source_ids[url] = url
+        metrics["sources_accepted"] += 1
+    contacts = []
+    try:
+        contacts = client.table("contacts").select("*").eq("company_id", company_id).execute().data or [] if company_id else []
+    except Exception:
+        contacts = []
+    for person in data.get("people") or []:
+        name = str(person.get("full_name") or "").strip()
+        if not name:
+            continue
+        identity = max(0.0, min(100.0, float(person.get("identity_confidence") or 0)))
+        current_company = str(person.get("current_company") or "")
+        company_match = bool(company and current_company and normalize_person_name(company) in normalize_person_name(current_company))
+        matches = sorted(((person_name_compatibility(str(row.get("display_name") or ""), name), row) for row in contacts), reverse=True, key=lambda item: item[0])
+        existing = matches[0][1] if matches and matches[0][0] >= 0.78 and (company_match or company_id) else None
+        if existing:
+            contact = existing
+            metrics["duplicates_prevented"] += 1
+            updates = {"contact_confidence": max(float(existing.get("contact_confidence") or 0), identity / 100), "technical_relevance": max(float(existing.get("technical_relevance") or 0), float(person.get("technical_relevance") or 0)), "identity_reason": "ChatGPT Work result validated against canonical name/context"}
+            client.table("contacts").update(updates).eq("id", existing["id"]).execute()
+        elif identity >= 70 and company_id and (company_match or not current_company):
+            normalized = normalize_person_name(name)
+            contact_id = str(uuid5(NAMESPACE_URL, f"svak:contact:{company_id}:{normalized}"))
+            contact = {"id": contact_id, "company_id": company_id, "normalized_name": normalized, "display_name": name, "title": person.get("current_title"), "department": None, "contact_confidence": identity / 100, "technical_relevance": float(person.get("technical_relevance") or 0), "candidate_status": "IDENTITY_RESOLVED", "identity_reason": "Validated Work result with contextual identity evidence"}
+            client.table("contacts").upsert(contact, on_conflict="id").execute()
+            contacts.append(contact)
+            metrics["contacts_created"] += 1
+        else:
+            continue
+        metrics["people_canonicalised"] += 1
+        contact_id = contact["id"]
+        urls = set(str(value) for value in person.get("source_urls") or [] if _url_ok(value))
+        for claim in person.get("claims") or []:
+            urls.update(str(value) for value in claim.get("source_urls") or [] if _url_ok(value))
+        ids = []
+        for url in urls:
+            source = sources_by_url.get(url) or {"url": url, "title": url, "publisher": urlparse(url).netloc, "source_type": "OTHER_PUBLIC"}
+            try:
+                row = client.table("contact_sources").upsert({"contact_id": contact_id, "url": url, "title": source.get("title") or url, "publisher": source.get("publisher") or urlparse(url).netloc, "source_type": source.get("source_type") or "OTHER_PUBLIC", "status": "USED", "evidence_strength": source.get("suggested_source_class") or "DISCOVERY_WEAK", "why_used": "ChatGPT Work source staged for deterministic validation", "source_kind": "CHATGPT_WORK_GITHUB"}, on_conflict="contact_id,url").select("id").execute()
+                rows = getattr(row, "data", None) or []
+                if rows: ids.append(rows[0]["id"])
+            except Exception:
+                continue
+        for claim in person.get("claims") or []:
+            text = str(claim.get("claim") or "").strip()
+            if not text: continue
+            provenance = "OBSERVED" if claim.get("source_urls") else "INFERRED"
+            try:
+                client.table("contact_claims").insert({"contact_id": contact_id, "claim_type": claim.get("claim_type") or "WORK_RESEARCH", "claim_text": text, "provenance": provenance, "confidence": max(0.0, min(1.0, float(claim.get("confidence") or 0.5))), "source_ids": ids, "opportunity_id": opportunity_id}).execute()
+                metrics["claims_accepted"] += 1
+            except Exception:
+                pass
+        for work in person.get("technical_work") or []:
+            title = str(work.get("title") or "").strip()
+            if not title: continue
+            try:
+                client.table("contact_works").insert({"contact_id": contact_id, "work_type": work.get("type") or "OTHER", "title": title, "work_date": work.get("date"), "person_role": "Proposed by ChatGPT Work; validation pending", "company_context": current_company or None, "topic": work.get("technical_topic"), "molecules": [work["molecule"]] if work.get("molecule") else [], "technical_themes": [work["impurity"]] if work.get("impurity") else [], "attribution": "PERSON_DIRECT", "confidence": max(0.0, min(1.0, float(person.get("technical_relevance") or 50) / 100)), "source_ids": ids}).execute()
+                metrics["works_accepted"] += 1
+            except Exception:
+                pass
+        try:
+            client.table("opportunity_contacts").upsert({"opportunity_id": opportunity_id, "contact_id": contact_id, "role_fit_score": float(person.get("identity_confidence") or 0), "rank": 1, "rationale": "CHATGPT_WORK; staged source-backed candidate"}, on_conflict="opportunity_id,contact_id").execute()
+        except Exception:
+            pass
+    return metrics

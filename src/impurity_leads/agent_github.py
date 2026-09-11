@@ -1,0 +1,119 @@
+"""GitHub issue/comment transport for the ChatGPT Work bridge.
+
+GitHub is treated as an untrusted message bus. This module only serialises
+bounded job context and extracts marked JSON; it never executes comment text.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+from datetime import datetime, timezone
+from typing import Any
+
+AGENT_JOB_START = "<!-- SVAK_AGENT_JOB_START -->"
+AGENT_JOB_END = "<!-- SVAK_AGENT_JOB_END -->"
+WORK_RESULT_START = "<!-- SVAK_WORK_RESULT_START -->"
+WORK_RESULT_END = "<!-- SVAK_WORK_RESULT_END -->"
+MAX_COMMENT_CHARS = 200_000
+
+
+def build_issue_payload(job: dict[str, Any]) -> dict[str, Any]:
+    known = job.get("known_entities") or {}
+    return {
+        "agent_job_id": str(job.get("id") or ""),
+        "opportunity_id": str(job.get("opportunity_id") or ""),
+        "company": known.get("company") or job.get("company") or "UNKNOWN",
+        "molecule": known.get("molecule") or job.get("molecule") or "UNKNOWN",
+        "opportunity_score": known.get("opportunity_score", job.get("priority")),
+        "quality_before": job.get("quality_before") or {},
+        "missing_dimensions": job.get("missing_dimensions") or [],
+        "known_contacts": job.get("known_contacts") or [],
+        "known_entities": known,
+        "known_claims": job.get("known_claims") or [],
+        "known_sources": job.get("known_sources") or [],
+        "research_goal": job.get("research_goal") or "Resolve only the missing dimensions.",
+        "agent_prompt": job.get("agent_prompt") or "Use the bounded research instructions in this issue.",
+        "research_limits": {
+            "max_people": 15,
+            "max_sources": 10,
+            "public_sources_only": True,
+            "no_authenticated_scraping": True,
+        },
+        "required_json_schema": "Use the schema in agent_prompt; return JSON only.",
+    }
+
+
+def render_issue_body(job: dict[str, Any]) -> str:
+    payload = build_issue_payload(job)
+    readable = (
+        "SVAK automated Work research job. Research only the unresolved dimensions "
+        "listed in the payload. Use bounded public-web research and return the "
+        "required JSON as one issue comment between the result markers.\n\n"
+        "Do not bypass authentication, CAPTCHA, paywalls, or private data. Do not "
+        "guess emails. Do not modify code, merge PRs, or access Supabase.\n\n"
+        "Bounded Work instructions and the strict output schema:\n"
+        f"{payload.get('agent_prompt', '')}\n\n"
+        f"{AGENT_JOB_START}\n{json.dumps(payload, indent=2, ensure_ascii=False)}\n{AGENT_JOB_END}\n\n"
+        "Return only a JSON result comment using:\n"
+        f"{WORK_RESULT_START}\n{{...}}\n{WORK_RESULT_END}"
+    )
+    return readable
+
+
+def extract_marked_json(text: str, start_marker: str = WORK_RESULT_START, end_marker: str = WORK_RESULT_END) -> tuple[Any | None, str | None]:
+    if not isinstance(text, str) or len(text) > MAX_COMMENT_CHARS:
+        return None, "comment_too_large"
+    start = text.find(start_marker)
+    end = text.find(end_marker, start + len(start_marker)) if start >= 0 else -1
+    if start < 0 or end < 0:
+        return None, "markers_missing"
+    raw = text[start + len(start_marker):end].strip()
+    if not raw:
+        return None, "empty_result"
+    try:
+        return json.loads(raw), None
+    except json.JSONDecodeError:
+        return None, "invalid_json"
+
+
+def extract_job_payload(issue_body: str) -> tuple[dict[str, Any] | None, str | None]:
+    value, error = extract_marked_json(issue_body, AGENT_JOB_START, AGENT_JOB_END)
+    if error:
+        return None, error
+    if not isinstance(value, dict) or not value.get("agent_job_id"):
+        return None, "invalid_job_payload"
+    return value, None
+
+
+def _run_gh(args: list[str], *, repo: str) -> str:
+    env = os.environ.copy()
+    env["GH_REPO"] = repo
+    result = subprocess.run(["gh", *args], check=True, capture_output=True, text=True, env=env, timeout=30)
+    return result.stdout.strip()
+
+
+def export_ready_agent_jobs(client: Any, *, repo: str, limit: int = 5) -> dict[str, Any]:
+    """Export READY jobs once. GitHub failures remain observable and retryable."""
+    rows = client.table("agent_research_jobs").select("*").eq("status", "READY").is_("github_issue_number", "null").order("priority", desc=True).limit(limit).execute().data or []
+    exported = []
+    errors = []
+    for job in rows:
+        title = f"[SVAK Research] {job.get('known_entities', {}).get('company', 'Opportunity')} / {job.get('known_entities', {}).get('molecule', 'Molecule')} / {','.join(job.get('missing_dimensions') or [])}"
+        try:
+            for label in ("svak-work-ready", "svak-research", "priority-high" if int(job.get("priority") or 0) >= 85 else "priority-normal"):
+                try:
+                    _run_gh(["label", "create", label, "--color", "1d76db", "--force"], repo=repo)
+                except Exception:
+                    pass
+            url = _run_gh(["issue", "create", "--title", title[:240], "--body", render_issue_body(job), "--label", "svak-work-ready", "--label", "svak-research", "--label", "priority-high" if int(job.get("priority") or 0) >= 85 else "priority-normal"], repo=repo)
+            match = re.search(r"/(?:issues|pull)/(\d+)$", url)
+            if not match:
+                raise RuntimeError("github_issue_number_missing")
+            number = int(match.group(1))
+            client.table("agent_research_jobs").update({"github_issue_number": number, "github_issue_url": url, "exported_at": datetime.now(timezone.utc).isoformat(), "status": "EXPORTED"}).eq("id", job["id"]).execute()
+            exported.append({"job_id": job["id"], "issue_number": number, "url": url})
+        except Exception as exc:
+            errors.append({"job_id": job.get("id"), "error": type(exc).__name__})
+    return {"status": "COMPLETED" if not errors else "PARTIAL", "exported": exported, "errors": errors}
