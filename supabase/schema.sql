@@ -206,6 +206,7 @@ create table if not exists public.opportunity_contacts (
   role_fit_score integer not null check (role_fit_score >= 0 and role_fit_score <= 100),
   rank integer not null check (rank >= 1 and rank <= 3),
   rationale text not null,
+  source_ids uuid[] not null default '{}',
   primary key(opportunity_id, contact_id)
 );
 

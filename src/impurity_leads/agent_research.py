@@ -41,6 +41,23 @@ OUTPUT_SCHEMA = {
 ACTIVE_AGENT_STATUSES = {"QUEUED", "READY", "EXPORTED", "RESULT_SUBMITTED", "VALIDATING"}
 
 
+def opportunity_contact_link_payload(*, opportunity_id: str, contact_id: str, identity_confidence: Any,
+                                    source_ids: list[str], rationale: str) -> dict[str, Any]:
+    """Build a schema-safe, provenance-bearing opportunity contact link."""
+    try:
+        score = int(round(float(identity_confidence or 0)))
+    except (TypeError, ValueError):
+        score = 0
+    return {
+        "opportunity_id": opportunity_id,
+        "contact_id": contact_id,
+        "role_fit_score": max(0, min(100, score)),
+        "rank": 1,
+        "rationale": rationale,
+        "source_ids": list(dict.fromkeys(str(value) for value in source_ids if value)),
+    }
+
+
 def build_agent_research_prompt(job: dict[str, Any]) -> str:
     """Build one bounded, copyable Work prompt from a READY job."""
     known_entities = job.get("known_entities") or {}
@@ -289,7 +306,8 @@ def apply_validated_agent_research(client: Any, *, job: dict[str, Any], validate
             except Exception:
                 pass
         try:
-            client.table("opportunity_contacts").upsert({"opportunity_id": opportunity_id, "contact_id": contact_id, "role_fit_score": float(person.get("identity_confidence") or 0), "rank": 1, "rationale": "CHATGPT_WORK; staged source-backed candidate"}, on_conflict="opportunity_id,contact_id").execute()
-        except Exception:
-            pass
+            link_reason = "CHATGPT_WORK; " + ("PATENT_INVENTOR" if any(str(work.get("type") or "").upper() == "PATENT" for work in person.get("technical_work") or []) else "TECHNICAL_WORK")
+            client.table("opportunity_contacts").upsert(opportunity_contact_link_payload(opportunity_id=opportunity_id, contact_id=contact_id, identity_confidence=person.get("identity_confidence"), source_ids=ids, rationale=link_reason), on_conflict="opportunity_id,contact_id").execute()
+        except Exception as exc:
+            metrics.setdefault("link_errors", []).append(str(exc)[:240])
     return metrics

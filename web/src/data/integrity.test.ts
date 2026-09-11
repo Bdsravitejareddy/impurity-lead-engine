@@ -15,6 +15,12 @@ describe('canonical contact read model', () => {
     expect(rows).toHaveLength(2)
     expect(rows[0]).toMatchObject({ id: 'c1', company: 'Acme', linked_opportunities: 2, sources: 1 })
   })
+
+  it('uses persisted quality diagnostics for canonical contact quality', () => {
+    const [row] = buildCanonicalContacts([{ id: 'c1', display_name: 'A', company_id: 'co1', quality_diagnostics: { score: 61.1, dimensions: { current_role: 20 } } }], [], [], new Map([['co1', 'Acme']]))
+    expect(row.quality).toBe(61.1)
+    expect(row.current_role_confidence).toBe(0.2)
+  })
 })
 
 describe('evidence read model', () => {

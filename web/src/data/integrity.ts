@@ -14,8 +14,8 @@ export function buildCanonicalContacts(
     company: companyNames.get(contact.company_id) || 'Unknown company',
     linked_opportunities: opps.get(contact.id)?.size || 0,
     sources: sourceKeys.get(contact.id)?.size || 0,
-    quality: Number(contact.contact_quality_score ?? contact.contact_confidence ?? 0),
-    current_role_confidence: Number(contact.current_role_confidence ?? contact.contact_confidence ?? 0),
+    quality: Number(contact.contact_quality_score ?? contact.quality_diagnostics?.score ?? contact.contact_confidence ?? 0),
+    current_role_confidence: contact.current_role_confidence != null ? Number(contact.current_role_confidence) : contact.quality_diagnostics?.dimensions?.current_role != null ? Number(contact.quality_diagnostics.dimensions.current_role) / 100 : Number(contact.contact_confidence ?? 0),
     contactability: contact.email_status || contact.phone_status || (contact.profile_url ? 'PROFESSIONAL' : 'UNKNOWN'),
     last_verified: contact.last_verified_at || null,
   }))

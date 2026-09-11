@@ -1,9 +1,23 @@
 from impurity_leads.agent_research import (
     active_agent_dedupe_key,
     build_agent_research_prompt,
+    opportunity_contact_link_payload,
     queue_agent_research_job,
     validate_agent_submission,
 )
+
+
+def test_opportunity_contact_link_payload_casts_score_and_preserves_source_ids():
+    payload = opportunity_contact_link_payload(
+        opportunity_id="opp",
+        contact_id="contact",
+        identity_confidence=94.0,
+        source_ids=["source-a", "source-a", "source-b"],
+        rationale="PATENT_INVENTOR",
+    )
+    assert payload["role_fit_score"] == 94
+    assert payload["source_ids"] == ["source-a", "source-b"]
+    assert payload["rationale"] == "PATENT_INVENTOR"
 
 
 class Result:
