@@ -14,6 +14,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from impurity_leads.contacts.normalize import normalize_person_name
+from impurity_leads.research_graph import publication_graph_entities
 
 EUROPE_PMC = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 TECHNICAL_TERMS = ("analytical", "quality", "impurity", "degradation", "stability", "method", "regulatory", "cmc", "api", "validation")
@@ -240,6 +241,67 @@ def _analysis_for(text: str, source_id: str | None) -> tuple[list[dict[str, Any]
     return themes, problems, jtbd
 
 
+def _persist_publication_graph(client: Any, *, contact: dict[str, Any], item: dict[str, Any], source_id: str | None, source_url: str, text: str) -> None:
+    """Best-effort graph write for a validated publication.
+
+    Contact Intelligence remains authoritative. Graph persistence is additive
+    and intentionally isolated so a graph-table outage cannot lose a source,
+    work, or claim already written to the normalized Contact 360 tables.
+    """
+    if not source_id:
+        return
+    person = str(contact.get("display_name") or contact.get("name") or "").strip()
+    company = str(contact.get("company") or contact.get("company_name") or "").strip()
+    title = str(item.get("title") or "Europe PMC publication").strip()
+    entities = publication_graph_entities(person=person, company=company, title=title)
+    ids: dict[str, str] = {}
+    for row in entities:
+        response = client.table("research_entities").upsert(row, on_conflict="entity_type,normalized_name").execute()
+        data = getattr(response, "data", None) or []
+        entity_id = data[0].get("id") if data else None
+        if not entity_id:
+            lookup = client.table("research_entities").select("id").eq("entity_type", row["entity_type"]).eq("normalized_name", row["normalized_name"]).limit(1).execute()
+            data = getattr(lookup, "data", None) or []
+            entity_id = data[0].get("id") if data else None
+        if entity_id:
+            ids[row["entity_type"]] = entity_id
+    if ids.get("PERSON") and ids.get("PUBLICATION"):
+        client.table("research_relationships").upsert({
+            "from_entity_id": ids["PERSON"], "to_entity_id": ids["PUBLICATION"],
+            "relationship_type": "AUTHORED", "source_ids": [source_id],
+            "confidence": 0.78, "provenance": "OBSERVED",
+        }, on_conflict="from_entity_id,to_entity_id,relationship_type").execute()
+    if ids.get("PUBLICATION") and ids.get("COMPANY"):
+        client.table("research_relationships").upsert({
+            "from_entity_id": ids["PUBLICATION"], "to_entity_id": ids["COMPANY"],
+            "relationship_type": "ASSOCIATED_WITH", "source_ids": [source_id],
+            "confidence": 0.55, "provenance": "INFERRED",
+        }, on_conflict="from_entity_id,to_entity_id,relationship_type").execute()
+    for claim in _graph_claims(text, source_id=source_id, source_url=source_url, entity_id=ids.get("PUBLICATION")):
+        client.table("research_claims").insert(claim).execute()
+
+
+def _graph_claims(text: str, *, source_id: str, source_url: str, entity_id: str | None) -> list[dict[str, Any]]:
+    rows = []
+    lower = text.casefold()
+    labels = {
+        "impurity": "impurity control",
+        "degradation": "degradation-product work",
+        "stability": "stability support",
+        "related substance": "related-substances analysis",
+        "method validation": "analytical method validation",
+    }
+    for term, label in labels.items():
+        if term in lower:
+            rows.append({
+                "entity_id": entity_id, "source_id": source_id,
+                "claim_text": f"Source discusses {label}.", "source_url": source_url,
+                "source_class": "PRIMARY", "attribution": "PERSON_DIRECT",
+                "provenance": "OBSERVED", "support_text": text[:500], "confidence": 0.72,
+            })
+    return rows
+
+
 def run_pending_contact_research(settings, *, limit: int = 10, fetcher: Callable[[str], dict[str, Any]] = _get_json) -> dict[str, Any]:
     """Process queued contact research runs using the backend-only Supabase key."""
     if not settings.supabase_url or not settings.supabase_secret_key:
@@ -316,6 +378,12 @@ def run_pending_contact_research(settings, *, limit: int = 10, fetcher: Callable
                         if source_id:
                             client.table("contact_claims").insert({"contact_id": contact["id"], "claim_type": "PUBLICATION_AUTHORED", "claim_text": f"{contact.get('display_name') or 'The contact'} is named in: {title[:250]}", "provenance": "OBSERVED", "confidence": 0.78, "source_ids": [source_id]}).execute()
                             claims += 1
+                            try:
+                                _persist_publication_graph(client, contact=contact, item=item, source_id=source_id, source_url=url, text=text)
+                            except Exception:
+                                # Graph tables are additive; a graph write must
+                                # never make validated Contact 360 data fail.
+                                pass
                             derived_themes, derived_problems, derived_jtbd = _analysis_for(text, source_id)
                             for row in derived_themes:
                                 client.table("contact_themes").upsert({"contact_id": contact["id"], **row}, on_conflict="contact_id,theme").execute()

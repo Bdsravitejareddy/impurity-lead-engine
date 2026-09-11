@@ -67,3 +67,21 @@ def fuse_claims(claims: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     for item in grouped.values():
         item["confidence"] = min(0.99, float(item.get("confidence", 0.5)) + 0.05 * max(0, len(item["supporting_sources"]) - 1))
     return list(grouped.values())
+
+
+def publication_graph_entities(*, person: str, company: str, title: str) -> list[dict[str, Any]]:
+    """Return canonical graph entity payloads for a publication finding."""
+    rows = []
+    for entity_type, name, metadata in (
+        ("PERSON", person, {"role": "named author"}),
+        ("COMPANY", company, {}),
+        ("PUBLICATION", title, {}),
+    ):
+        if name and str(name).strip():
+            rows.append({
+                "entity_type": entity_type,
+                "canonical_name": str(name).strip()[:500],
+                "normalized_name": normalize_entity_name(name),
+                "metadata_json": metadata,
+            })
+    return rows
