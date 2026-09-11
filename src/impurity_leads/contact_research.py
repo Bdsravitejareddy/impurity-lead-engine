@@ -335,8 +335,10 @@ def run_pending_contact_research(settings, *, limit: int = 10, fetcher: Callable
         return {"status": "SKIPPED", "reason": "supabase_credentials_missing", "processed": 0}
     from supabase import create_client
     client = create_client(settings.supabase_url, settings.supabase_secret_key)
+    portfolio = _portfolio_snapshot(client, settings)
     queued = client.table("contact_research_runs").select("*").eq("status", "QUEUED").order("created_at").limit(limit).execute().data or []
     totals = {"status": "COMPLETED", "processed": 0, "queries": 0, "sources": 0, "used": 0, "rejected": 0, "blocked": 0, "failed": 0, "pending": 0, "works": 0, "conflicts": 0}
+    totals["quality"] = portfolio
     for run in queued:
         run_id = run["id"]
         contact_rows = client.table("contacts").select("*").eq("id", run["contact_id"]).limit(1).execute().data or []
