@@ -54,7 +54,9 @@ def main() -> int:
     client.table("agent_research_submissions").update({"processed_at": datetime.now(timezone.utc).isoformat(), "validation_status": "VALID"}).eq("id", (submission.data or [{}])[0].get("id")).execute()
     client.table("agent_research_jobs").update({"status": "APPLIED", "validated_at": datetime.now(timezone.utc).isoformat(), "completed_at": datetime.now(timezone.utc).isoformat(), "metrics": metrics}).eq("id", job_id).execute()
     _gh(["issue", "comment", str(issue["number"]), "--body", "SVAK validation complete.\n\nStatus: APPLIED\n" + json.dumps(metrics, sort_keys=True)], repo)
-    _gh(["issue", "edit", str(issue["number"]), "--remove-label", "svak-work-ready", "--add-label", "svak-work-applied", "--state", "closed"], repo)
+    _gh(["label", "create", "svak-work-applied", "--color", "0e8a16", "--force"], repo)
+    _gh(["issue", "edit", str(issue["number"]), "--remove-label", "svak-work-ready", "--add-label", "svak-work-applied"], repo)
+    _gh(["issue", "close", str(issue["number"]), "--comment", "SVAK marked this job applied."], repo)
     print(json.dumps({"event": "agent_result_applied", "job_id": job_id, **metrics}, sort_keys=True))
     return 0
 
