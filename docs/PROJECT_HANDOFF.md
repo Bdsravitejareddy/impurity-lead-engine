@@ -210,3 +210,13 @@ The next safe step is to run an authenticated browser acceptance pass against `h
 - Production migration was applied through authenticated CLI. Live workflow `34583698679` processed job `3d2df11e-54d1-4849-9e35-26fe5a91efd7` for the score-100 Lannett Holdings/MORPHINE SULFATE opportunity and reached `COMPLETED / NO_NEW_EVIDENCE` with 0 sources, 0 claims and 0 relationships. This proves queue execution and safe stopping; it does not claim live evidence discovery.
 - Latest validation: backend `245 passed`, integration `14 passed`, frontend `32 passed`, build and diff check passed. Current commits include `84b21ed` (targeted orchestration), `92a9b3c` (safe failure diagnostics), and `ded3088` (production schema mapping).
 - Remaining work: add more public-source adapters, create canonical people from validated technical authors/inventors, persist opportunity-contact joins, and enable targeted AI search only when explicitly configured.
+
+## Technical evidence to canonical contacts (2026-09-11)
+
+- Added publication author extraction with author order, corresponding-author flag, source-dated affiliation, ORCID/DOI/PMID metadata and conservative candidate states. Europe PMC requests now use `resultType=core` so author/affiliation metadata is available when the public endpoint supplies it.
+- Added conservative author resolution: target-company affiliation plus compatible name context is required before creating/reusing a contact. Historical publication affiliation is stored as source-dated evidence and the generated title explicitly says current employment is unverified.
+- Accepted author evidence writes Contact 360 source/claim/work rows, graph person/publication/company entities and relationships, and an `opportunity_contacts` link with rationale. Ambiguous/common-name authors are retained as evidence candidates but are not promoted automatically.
+- Added a bounded public Google Patents discovery provider and source metadata support. No authenticated or paid access is used.
+- Added contact evidence columns (`candidate_status`, `identity_reason`, `technical_relevance`, `quality_diagnostics`) and diagnostics explaining person-direct evidence versus title fallback.
+- Live Roche/cobimetinib workflow `34589368911` found one public technical source and one graph relationship, but the returned public record did not include a target-company-affiliated author, so no contact was safely created or linked. This is an honest partial live result; no duplicate contact was created.
+- Latest validation: backend `250 passed`, integration remains `14 passed`, frontend `32 passed`, build and diff check passed. OpenAI remains disabled.

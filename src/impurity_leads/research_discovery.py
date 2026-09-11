@@ -41,7 +41,7 @@ class EuropePmcProvider(DiscoveryProvider):
         self.base_url = base_url
 
     def discover(self, request: SearchRequest) -> list[SearchResult]:
-        url = f"{self.base_url}?query={quote(request.query)}&format=json&pageSize={min(request.max_results, 25)}"
+        url = f"{self.base_url}?query={quote(request.query)}&format=json&resultType=core&pageSize={min(request.max_results, 25)}"
         payload = self.fetch_json(url)
         results: list[SearchResult] = []
         for item in (payload.get("resultList") or {}).get("result", [])[:request.max_results]:
@@ -57,6 +57,33 @@ class EuropePmcProvider(DiscoveryProvider):
                 source_type="SCIENTIFIC_PUBLICATION",
                 metadata=item,
             ))
+        return results
+
+
+class PublicPatentProvider(DiscoveryProvider):
+    """Bounded Google Patents public-page discovery; no login or bypass."""
+    name = "google_patents"
+
+    def __init__(self, fetch_text: Callable[[str], str]):
+        self.fetch_text = fetch_text
+
+    def discover(self, request: SearchRequest) -> list[SearchResult]:
+        from html import unescape
+        import re
+        url = f"https://patents.google.com/?q={quote(request.query)}"
+        html = self.fetch_text(url)
+        results: list[SearchResult] = []
+        seen: set[str] = set()
+        for match in re.finditer(r'href="(/patent/[A-Z0-9]+(?:/[a-z]{2})?)"[^>]*>(.*?)</a>', html, re.I | re.S):
+            href, title = match.groups()
+            full_url = f"https://patents.google.com{href}"
+            if full_url in seen:
+                continue
+            seen.add(full_url)
+            clean_title = re.sub(r"<[^>]+>", " ", unescape(title)).strip()
+            results.append(SearchResult(url=full_url, title=clean_title[:500] or "Public patent", domain="patents.google.com", discovered_via=self.name, source_type="PATENT"))
+            if len(results) >= request.max_results:
+                break
         return results
 
 
