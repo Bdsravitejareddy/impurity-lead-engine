@@ -23,6 +23,7 @@ class SearchResult:
     domain: str = ""
     discovered_via: str = "direct"
     source_type: str = "OTHER_PUBLIC_WEB"
+    metadata: dict[str, Any] | None = None
 
 
 class DiscoveryProvider:
@@ -54,6 +55,7 @@ class EuropePmcProvider(DiscoveryProvider):
                 domain="europepmc.org",
                 discovered_via=self.name,
                 source_type="SCIENTIFIC_PUBLICATION",
+                metadata=item,
             ))
         return results
 

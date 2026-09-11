@@ -36,10 +36,14 @@ def score_contact(contact: dict[str, Any], *, sources: Iterable[dict[str, Any]] 
     current_role = _bounded(contact.get("current_role_confidence"))
     if not current_role:
         current_role = 82.0 if contact.get("title") and contact.get("last_verified_at") else (62.0 if contact.get("title") else 20.0)
+    reasons: dict[str, list[str]] = {}
     technical = _bounded(contact.get("technical_relevance"))
+    if technical:
+        reasons["technical_relevance"] = ["person-direct technical evidence"]
     if not technical:
         text = " ".join(str(contact.get(key) or "").casefold() for key in ("title", "department", "function"))
         technical = 75.0 if any(term in text for term in ("analytical", "quality", "impurity", "cmc", "stability", "regulatory", "api")) else 25.0
+        reasons["technical_relevance"] = ["title/department keyword fallback"] if technical > 25 else ["no technical evidence"]
     classes = {str(row.get("source_class") or row.get("source_type") or "").upper() for row in source_rows}
     source_independence = min(100.0, len(classes) * 25.0) if classes else 0.0
     recency = _bounded(contact.get("recency_score")) or (70.0 if contact.get("last_verified_at") else 20.0)
@@ -57,7 +61,15 @@ def score_contact(contact: dict[str, Any], *, sources: Iterable[dict[str, Any]] 
     }
     weights = {"identity": .20, "current_role": .15, "technical_relevance": .25, "source_independence": .15, "recency": .10, "contactability": .10, "opportunity_fit": .05}
     score = round(sum(dimensions[key] * weights[key] for key in weights), 1)
-    return {"score": score, "dimensions": dimensions, "identity_confidence": identity, "technical_relevance": technical}
+    if identity < 70:
+        reasons["identity"] = ["name present but independent corroboration is missing"]
+    elif contact.get("identity_reason"):
+        reasons["identity"] = [str(contact["identity_reason"])]
+    if current_role < 70:
+        reasons["current_role"] = ["current role evidence is missing or stale"]
+    if not source_rows:
+        reasons["source_independence"] = ["no independent source classes"]
+    return {"score": score, "dimensions": dimensions, "identity_confidence": identity, "technical_relevance": technical, "diagnostics": reasons}
 
 
 def portfolio_quality(contacts: Iterable[dict[str, Any]], *, duplicate_count: int = 0, config: QualityConfig = QualityConfig()) -> dict[str, Any]:

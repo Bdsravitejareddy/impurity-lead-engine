@@ -308,11 +308,15 @@ def _portfolio_snapshot(client: Any, settings: Any) -> dict[str, Any]:
     try:
         rows = client.table("contacts").select("*").execute().data or []
         source_rows = client.table("contact_sources").select("*").execute().data or []
+        work_rows = client.table("contact_works").select("contact_id,attribution,technical_themes").execute().data or []
+        direct_work_contacts = {str(row.get("contact_id")) for row in work_rows if row.get("attribution") == "PERSON_DIRECT"}
         source_classes: dict[str, set[str]] = {}
         for source in source_rows:
             source_classes.setdefault(str(source.get("contact_id")), set()).add(str(source.get("source_type") or source.get("source_kind") or "OTHER"))
         for row in rows:
             row["source_classes"] = list(source_classes.get(str(row.get("id")), set()))
+            if str(row.get("id")) in direct_work_contacts:
+                row["technical_relevance"] = max(float(row.get("technical_relevance") or 0), 85.0)
         duplicate_count = 0
         config = QualityConfig(
             daily_contact_target=getattr(settings, "daily_contact_target", 10),

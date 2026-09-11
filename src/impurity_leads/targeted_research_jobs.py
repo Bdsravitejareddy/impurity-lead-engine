@@ -3,11 +3,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 
 from impurity_leads.contact_quality import QualityConfig
 from impurity_leads.research_adapters import classify_source
 from impurity_leads.research_discovery import DiscoveryProvider, EuropePmcProvider
 from impurity_leads.targeted_research import OpportunityCoverage, evaluate_opportunity_coverage, targeted_query_plan
+from impurity_leads.person_discovery import affiliation_matches_company, candidate_identity_state, extract_authors, rank_candidate
+from impurity_leads.contacts.normalize import normalize_person_name
 
 
 def _now() -> str:
@@ -60,6 +63,47 @@ def _upsert_entity(client: Any, entity_type: str, name: str, metadata: dict[str,
     return data[0].get("id") if data else None
 
 
+def _resolve_or_create_author(client: Any, candidate: Any, *, company_id: str | None, company_name: str, source_date: str | None, technical_text: str) -> tuple[dict[str, Any] | None, str, float]:
+    """Reuse a canonical person or create a conservative technical candidate."""
+    if not company_id or not affiliation_matches_company(candidate.affiliation, company_name):
+        return None, "NEEDS_REVIEW", 45.0
+    normalized = normalize_person_name(candidate.name)
+    existing_rows = client.table("contacts").select("*").eq("company_id", company_id).execute().data or []
+    existing = next((row for row in existing_rows if normalize_person_name(str(row.get("display_name") or "")) == normalized), None)
+    if not existing:
+        existing = next((row for row in existing_rows if candidate_identity_state(candidate, row, company_match=True)[0] == "SAME_PERSON"), None)
+    state, confidence, _ = candidate_identity_state(candidate, existing, company_match=True)
+    if state == "NEEDS_REVIEW":
+        return None, state, confidence
+    if existing:
+        client.table("contacts").update({"contact_confidence": max(float(existing.get("contact_confidence") or 0), confidence), "technical_relevance": max(float(existing.get("technical_relevance") or 0), candidate.technical_relevance), "identity_reason": "technical publication affiliation plus canonical name context"}).eq("id", existing["id"]).execute()
+        existing["contact_confidence"] = max(float(existing.get("contact_confidence") or 0), confidence)
+        existing["technical_relevance"] = max(float(existing.get("technical_relevance") or 0), candidate.technical_relevance)
+        return existing, state, confidence
+    contact_id = str(uuid5(NAMESPACE_URL, f"svak:contact:{company_id}:{normalized}"))
+    row = {
+        "id": contact_id, "company_id": company_id, "normalized_name": normalized,
+        "display_name": candidate.name, "title": "Technical author (historical)",
+        "department": "Analytical / technical research", "contact_confidence": confidence,
+        "technical_relevance": candidate.technical_relevance, "candidate_status": "TECHNICALLY_RELEVANT",
+        "identity_reason": "name plus source-dated target-company affiliation; current employment unverified",
+        "first_seen_at": _now(), "last_seen_at": _now(),
+    }
+    client.table("contacts").upsert(row, on_conflict="id").execute()
+    return row, state, confidence
+
+
+def _persist_author_source(client: Any, *, contact: dict[str, Any], item: dict[str, Any], result: Any, candidate: Any, opportunity_id: str) -> str | None:
+    metadata = {"publication": {"title": item.get("title"), "pmid": item.get("pmid") or item.get("id"), "doi": item.get("doi") or item.get("doiId"), "journal": item.get("journalTitle")}, "author": {"name": candidate.name, "order": candidate.author_order, "corresponding": candidate.corresponding, "affiliation": candidate.affiliation}, "attribution": "PERSON_DIRECT", "employment": "HISTORICAL_SOURCE_DATED"}
+    source_row = {"contact_id": contact["id"], "url": result.url, "title": str(item.get("title") or result.title)[:300], "publisher": "Europe PMC", "source_type": "Scientific publication", "source_date": candidate.source_date, "status": "USED", "evidence_strength": "PRIMARY", "why_used": "Named author with source-dated target-company affiliation.", "source_kind": "EXTERNAL_RESEARCH", "extraction_json": metadata}
+    response = client.table("contact_sources").upsert(source_row, on_conflict="contact_id,url").select("id").execute()
+    data = getattr(response, "data", None) or []
+    source_id = data[0].get("id") if data else None
+    claim = {"contact_id": contact["id"], "claim_type": "PUBLICATION_AUTHORED", "claim_text": f"{candidate.name} is named as an author of {item.get('title') or result.title}", "provenance": "OBSERVED", "confidence": 0.82, "source_ids": [source_id] if source_id else [], "opportunity_id": opportunity_id}
+    client.table("contact_claims").insert(claim).execute()
+    return source_id
+
+
 def process_targeted_job(client: Any, job: dict[str, Any], opportunity: dict[str, Any], contacts: list[dict[str, Any]], provider: DiscoveryProvider, *, config: QualityConfig = QualityConfig()) -> dict[str, Any]:
     """Process one bounded job; source URLs and graph claims are durable."""
     job_id = job.get("id")
@@ -78,6 +122,8 @@ def process_targeted_job(client: Any, job: dict[str, Any], opportunity: dict[str
             molecule = str(opportunity.get("molecule_name") or opportunity.get("molecule") or "")
             company_id = _upsert_entity(client, "COMPANY", company)
             molecule_id = _upsert_entity(client, "MOLECULE", molecule)
+            new_contacts = 0
+            linked_contacts = 0
             for item in found:
                 source_class, source_type = classify_source(item.url, item.source_type)
                 publication_id = _upsert_entity(client, "PUBLICATION", item.title, {"url": item.url, "source_class": source_class})
@@ -88,7 +134,20 @@ def process_targeted_job(client: Any, job: dict[str, Any], opportunity: dict[str
                     if molecule_id:
                         client.table("research_relationships").upsert({"from_entity_id": publication_id, "to_entity_id": molecule_id, "relationship_type": "DISCUSSES", "source_ids": [], "confidence": 0.62, "provenance": "OBSERVED"}, on_conflict="from_entity_id,to_entity_id,relationship_type").execute()
                     client.table("research_claims").insert({"entity_id": publication_id, "claim_text": item.snippet or f"Public source discovered for {company} {molecule}", "source_url": item.url, "source_class": source_class if source_class in {"PRIMARY", "STRONG_PROFESSIONAL", "DIRECTORY", "DISCOVERY_WEAK"} else "DISCOVERY_WEAK", "attribution": "OPPORTUNITY_CONTEXT", "provenance": "OBSERVED", "support_text": item.snippet[:500], "confidence": 0.55}).execute()
-            result = {"status": "COMPLETED", "stop_reason": "NO_NEW_EVIDENCE" if not accepted else "MAX_ROUNDS", "sources": len(found), "claims": accepted, "relationships": accepted}
+                metadata = item.metadata or {}
+                for candidate in extract_authors(metadata, technical_text=f"{item.title} {item.snippet}"):
+                    contact, identity_state, identity_confidence = _resolve_or_create_author(client, candidate, company_id=opportunity.get("company_id"), company_name=company, source_date=candidate.source_date, technical_text=item.snippet)
+                    if not contact:
+                        continue
+                    if not any(str(row.get("id")) == str(contact.get("id")) for row in contacts):
+                        contacts.append(contact); new_contacts += 1
+                    source_id = _persist_author_source(client, contact=contact, item=metadata, result=item, candidate=candidate, opportunity_id=str(opportunity.get("id")))
+                    if source_id:
+                        client.table("contact_works").insert({"contact_id": contact["id"], "work_type": "PUBLICATION", "title": str(metadata.get("title") or item.title)[:300], "work_date": candidate.source_date, "person_role": "Named publication author", "company_context": company, "topic": item.snippet[:500], "technical_themes": ["impurity" if "impurity" in item.snippet.casefold() else "analytical"], "attribution": "PERSON_DIRECT", "confidence": 0.82, "source_ids": [source_id]}).execute()
+                        rank = rank_candidate(candidate, company_match=True)
+                        client.table("opportunity_contacts").upsert({"opportunity_id": opportunity["id"], "contact_id": contact["id"], "role_fit_score": rank, "rank": 1, "rationale": "PUBLICATION_AUTHOR; source-dated target-company affiliation; current role unverified"}, on_conflict="opportunity_id,contact_id").execute()
+                        linked_contacts += 1
+            result = {"status": "COMPLETED", "stop_reason": "NO_NEW_EVIDENCE" if not accepted else "MAX_ROUNDS", "sources": len(found), "claims": accepted, "relationships": accepted, "new_contacts": new_contacts, "linked_contacts": linked_contacts}
         except Exception as exc:
             result = {"status": "PARTIAL", "stop_reason": "PROVIDER_ERROR", "sources": 0, "claims": 0, "relationships": 0, "error": type(exc).__name__}
     if job_id:

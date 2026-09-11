@@ -7,6 +7,13 @@ def test_dimension_score_is_backend_authoritative_and_bounded():
     assert result["dimensions"]["technical_relevance"] >= 55
 
 
+def test_person_direct_evidence_explains_technical_score_over_title_fallback():
+    direct = score_contact({"technical_relevance": 85, "title": "Researcher", "contact_confidence": 60})
+    fallback = score_contact({"title": "Analytical Development Director", "contact_confidence": 60})
+    assert direct["dimensions"]["technical_relevance"] > fallback["dimensions"]["technical_relevance"]
+    assert "person-direct technical evidence" in direct["diagnostics"]["technical_relevance"]
+
+
 def test_gate_requires_quality_dimensions_not_only_contact_count():
     weak = [{"display_name": f"Person {i}"} for i in range(12)]
     result = portfolio_quality(weak, config=QualityConfig(daily_contact_target=10))
