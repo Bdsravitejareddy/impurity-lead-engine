@@ -8,7 +8,8 @@ export function sourceCoverage(sources: ContactSource[]) { const classes = new S
 export type ProfilePosition = {title:string; company_name?:string; department?:string; start_date?:string; end_date?:string; location?:string; description?:string; employment_type?:string; attribution:'PERSON_DIRECT'; confidence:number; review_suggested?:boolean}
 export type ProfileEducation = {institution:string; degree?:string; field?:string; start_date?:string; end_date?:string; description?:string; confidence:number; review_suggested?:boolean}
 export type ProfileWork = {title:string; work_type:string; work_date?:string; topic?:string; url?:string; authors?:string; publisher?:string; description?:string; attribution:'PERSON_DIRECT'; confidence:number; review_suggested?:boolean}
-export type PdfTextExtraction = { text: string; pages: number; warnings: string[] }
+export type PdfFailureClass = 'IMAGE_ONLY_PDF'|'TEXT_PRESENT_BUT_RECONSTRUCTION_FAILED'|'CORRUPT_OR_UNSUPPORTED_PDF'
+export type PdfTextExtraction = { text: string; pages: number; warnings: string[]; failureClass?: PdfFailureClass; metrics?: { itemCounts: number[]; characterCounts: number[]; averageItemLengths: number[]; fragmentedPages: number[] } }
 export type ProfileExtraction = { claims: string[]; currentTitle?: string; headline?: string; currentCompany?: string; location?: string; about?: string; skills?: string[]; certifications?: {name:string; issuer?:string; issue_date?:string; expiry_date?:string; credential_url?:string; confidence:number; review_suggested?:boolean}[]; activities?: ProfileWork[]; positions: ProfilePosition[]; education: ProfileEducation[]; themes: string[]; keywords: string[]; works: ProfileWork[]; warnings?: string[]; pages?: number }
 
 const sectionAliases: Record<string, string> = {
@@ -132,8 +133,38 @@ export function researchQueries(profile: ProfileExtraction, name: string): strin
   return [...new Set(terms.map(term => `${base} ${term}`)), ...profile.positions.slice(1, 4).flatMap(position => terms.slice(0, 4).map(term => `${name} ${position.company_name || ''} ${term}`))].filter(query => query.trim().split(/\s+/).length >= 2).slice(0, 20)
 }
 
+function reconstructPdfPage(items: any[]): { text: string; fragmented: boolean } {
+  const positioned = items.map(item => ({
+    text: String(item.str || ''),
+    x: Array.isArray(item.transform) ? Number(item.transform[4] || 0) : 0,
+    y: Array.isArray(item.transform) ? Number(item.transform[5] || 0) : 0,
+    width: Number(item.width || 0),
+    hasEOL: Boolean(item.hasEOL),
+  })).filter(item => item.text.trim())
+  positioned.sort((a, b) => b.y - a.y || a.x - b.x)
+  const lines: { y: number; items: typeof positioned }[] = []
+  for (const item of positioned) {
+    const line = lines.find(candidate => Math.abs(candidate.y - item.y) <= 3)
+    if (line) line.items.push(item); else lines.push({y: item.y, items: [item]})
+  }
+  const rendered = lines.map(line => {
+    line.items.sort((a, b) => a.x - b.x)
+    const averageLength = line.items.reduce((sum, item) => sum + item.text.length, 0) / Math.max(1, line.items.length)
+    const fragmented = line.items.length > 8 && averageLength <= 2
+    let value = ''
+    for (const item of line.items) {
+      const previous = line.items[line.items.indexOf(item) - 1]
+      const gap = previous ? item.x - (previous.x + previous.width) : 0
+      const separator = !value || fragmented ? (fragmented && gap < 8 ? '' : ' ') : gap > 4 ? ' ' : ''
+      value += separator + item.text
+    }
+    return {value: value.trim(), fragmented}
+  })
+  return {text: rendered.map(item => item.value).filter(Boolean).join('\n'), fragmented: rendered.some(item => item.fragmented)}
+}
+
 export async function extractPdfText(buffer: ArrayBuffer): Promise<PdfTextExtraction> {
-  const warnings: string[] = []
+  const warnings: string[] = []; const itemCounts: number[] = []; const characterCounts: number[] = []; const averageItemLengths: number[] = []; const fragmentedPages: number[] = []
   try {
     const pdfjs: any = await import('pdfjs-dist/legacy/build/pdf.mjs')
     const document = await pdfjs.getDocument({data: new Uint8Array(buffer), disableWorker: true}).promise
@@ -141,16 +172,17 @@ export async function extractPdfText(buffer: ArrayBuffer): Promise<PdfTextExtrac
     for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber++) {
       const page = await document.getPage(pageNumber); const content = await page.getTextContent();
       const items = (content.items || []).filter((item: any) => typeof item.str === 'string')
-      const lines: string[] = []; let lastY: number | null = null; let current = ''
-      for (const item of items) { const y = Array.isArray(item.transform) ? item.transform[5] : null; if (lastY !== null && y !== null && Math.abs(y - lastY) > 2) { if (current.trim()) lines.push(current.trim()); current = '' } current += (current ? ' ' : '') + item.str; if (y !== null) lastY = y }
-      if (current.trim()) lines.push(current.trim()); pages.push(lines.join('\n'))
+      itemCounts.push(items.length); characterCounts.push(items.reduce((sum: number, item: any) => sum + String(item.str || '').length, 0)); averageItemLengths.push(items.length ? characterCounts[characterCounts.length - 1] / items.length : 0)
+      const reconstructed = reconstructPdfPage(items); if (reconstructed.fragmented) fragmentedPages.push(pageNumber); pages.push(reconstructed.text)
     }
-    const text = pages.join('\n\n').replace(/[ \t]+\n/g, '\n').trim()
-    if (text.length < 40) warnings.push('Very little machine-readable text was found. Try Paste LinkedIn Text.')
-    return {text, pages: document.numPages, warnings}
+    const text = pages.join('\n\n').replace(/[ \t]+\n/g, '\n').trim(); const metrics = {itemCounts, characterCounts, averageItemLengths, fragmentedPages}
+    if (!text && itemCounts.every(count => count === 0)) { warnings.push('No machine-readable text objects were found. Try Paste LinkedIn Text.'); return {text, pages: document.numPages, warnings, failureClass:'IMAGE_ONLY_PDF', metrics} }
+    if (text.length < 40) { warnings.push('Very little machine-readable text was found. Try Paste LinkedIn Text.'); return {text, pages: document.numPages, warnings, failureClass:'TEXT_PRESENT_BUT_RECONSTRUCTION_FAILED', metrics} }
+    return {text, pages: document.numPages, warnings, metrics}
   } catch (error) {
-    warnings.push('The PDF could not be read as machine-readable text. Try Paste LinkedIn Text.')
-    return {text: '', pages: 0, warnings}
+    const safeError = error instanceof Error ? `${error.name}: ${error.message.slice(0, 160)}` : 'Unknown PDF parser error'
+    warnings.push(`The PDF could not be read as machine-readable text (${safeError}). Try Paste LinkedIn Text.`)
+    return {text: '', pages: 0, warnings, failureClass:'CORRUPT_OR_UNSUPPORTED_PDF', metrics:{itemCounts, characterCounts, averageItemLengths, fragmentedPages}}
   }
 }
 export type ResearchState = 'UNRESEARCHED'|'PARTIAL'|'RESEARCHED'|'DEEP PROFILE'

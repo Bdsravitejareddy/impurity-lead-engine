@@ -135,3 +135,30 @@ def test_store_links_contact_to_opportunity():
     row = client.tables["opportunity_contacts"].rows[0][0]
     assert row["rank"] == 1
     assert row["rationale"] == "target analytical leader"
+
+
+def test_store_reuses_existing_canonical_contact_for_academic_suffix_variant():
+    class SelectableTable(FakeTable):
+        def __init__(self, name):
+            super().__init__()
+            self.name = name
+        def select(self, *_): return self
+        def eq(self, *_): return self
+        def execute(self):
+            if self.name == "contacts":
+                return type("Result", (), {"data": [{"id": "canonical", "normalized_name": "benjamin roembke", "display_name": "Benjamin Roembke, Ph.D.", "title": "Director, Quality", "department": "quality", "profile_url": None, "primary_email": None}]})()
+            return super().execute()
+
+    class SelectableClient(FakeClient):
+        def table(self, name):
+            self.tables.setdefault(name, SelectableTable(name))
+            return self.tables[name]
+
+    now = datetime.now(timezone.utc)
+    client = SelectableClient(); store = SupabaseLeadStore(client)
+    ranked = _ranked_contact(now)
+    ranked.contact.display_name = "Benjamin Roembke PhD"
+    ranked.contact.title = "Director, Quality"
+    ranked.contact.normalized_name = "benjamin roembke"
+    store.save_contact("Teva Pharmaceuticals", ranked)
+    assert client.tables["contacts"].rows[0][0]["id"] == "canonical"

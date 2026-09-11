@@ -4,6 +4,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from impurity_leads.contacts.models import RankedContact
 from impurity_leads.models import Opportunity, Signal
 from impurity_leads.normalize import normalize_company_name, normalize_molecule_name
+from impurity_leads.contacts.normalize import normalize_person_name, person_name_compatibility
 
 
 def _stable_uuid(kind: str, value: str) -> UUID:
@@ -13,6 +14,7 @@ def _stable_uuid(kind: str, value: str) -> UUID:
 class SupabaseLeadStore:
     def __init__(self, client):
         self.client = client
+        self._contact_aliases: dict[tuple[str, str], str] = {}
 
     def _company_id(self, company_name: str) -> str:
         normalized = normalize_company_name(company_name)
@@ -100,6 +102,49 @@ class SupabaseLeadStore:
     def _contact_id(self, company_id: str, normalized_name: str) -> str:
         return str(_stable_uuid("contact", f"{company_id}:{normalized_name}"))
 
+    def _find_existing_contact(self, company_id: str, contact) -> tuple[str, str] | None:
+        """Find a canonical person before creating a new company contact.
+
+        Exact normalized names are safe. Abbreviated names are reused only
+        when the context is strong (matching profile URL/email or a
+        distinctive name plus compatible role); common names never merge on
+        name alone.
+        """
+        normalized = normalize_person_name(contact.display_name)
+        cache_key = (company_id, normalized)
+        if cache_key in self._contact_aliases:
+            return self._contact_aliases[cache_key], normalized
+        table = self.client.table("contacts")
+        if not hasattr(table, "select"):
+            return None
+        try:
+            rows = table.select("id,normalized_name,display_name,title,department,profile_url,primary_email").eq("company_id", company_id).execute().data or []
+        except Exception:
+            return None
+        best: tuple[float, dict] | None = None
+        for row in rows:
+            score = person_name_compatibility(str(row.get("display_name") or row.get("normalized_name") or ""), contact.display_name)
+            if score == 0:
+                continue
+            exact_route = bool(contact.profile_url and row.get("profile_url") and contact.profile_url.rstrip("/") == str(row["profile_url"]).rstrip("/"))
+            exact_email = bool(contact.primary_email and row.get("primary_email") and contact.primary_email.casefold() == str(row["primary_email"]).casefold())
+            role_terms = set(str(contact.title or contact.department or "").casefold().split()) & set(str(row.get("title") or row.get("department") or "").casefold().split())
+            strong_context = exact_route or exact_email or (score >= 0.9 and len(role_terms) >= 1) or (score >= 0.8 and len(normalized.split()[0]) >= 8 and len(role_terms) >= 1)
+            if strong_context and (best is None or score > best[0]):
+                best = (score, row)
+        if best:
+            row = best[1]
+            self._contact_aliases[cache_key] = str(row["id"])
+            return str(row["id"]), normalize_person_name(str(row.get("display_name") or row.get("normalized_name") or normalized))
+        return None
+
+    def _resolved_contact_id(self, company_id: str, contact) -> tuple[str, str]:
+        normalized = normalize_person_name(contact.display_name)
+        existing = self._find_existing_contact(company_id, contact)
+        if existing:
+            return existing
+        return self._contact_id(company_id, normalized), normalized
+
     def _opportunity_id(self, opportunity: Opportunity) -> str:
         company_id = str(_stable_uuid("company", normalize_company_name(opportunity.company_name)))
         molecule_id = str(_stable_uuid("molecule", normalize_molecule_name(opportunity.molecule_name)))
@@ -108,11 +153,11 @@ class SupabaseLeadStore:
     def save_contact(self, company_name: str, ranked_contact: RankedContact) -> None:
         company_id = self._company_id(company_name)
         contact = ranked_contact.contact
-        contact_id = self._contact_id(company_id, contact.normalized_name)
+        contact_id, canonical_name = self._resolved_contact_id(company_id, contact)
         row = {
             "id": contact_id,
             "company_id": company_id,
-            "normalized_name": contact.normalized_name,
+            "normalized_name": canonical_name,
             "display_name": contact.display_name,
             "title": contact.title,
             "department": contact.department,
@@ -127,7 +172,9 @@ class SupabaseLeadStore:
             "last_seen_at": contact.last_seen_at.isoformat() if contact.last_seen_at else None,
             "last_verified_at": contact.last_verified_at.isoformat() if contact.last_verified_at else None,
         }
+        # Keep the crawler RPC whitelist/idempotency contract unchanged.
         self.client.table("contacts").upsert(row, on_conflict="company_id,normalized_name").execute()
+        self._contact_aliases[(company_id, normalize_person_name(contact.display_name))] = contact_id
         for evidence in contact.evidence:
             evidence_row = {
                 "id": str(_stable_uuid("contact-evidence", evidence.fingerprint)),
@@ -145,7 +192,7 @@ class SupabaseLeadStore:
 
     def link_opportunity_contact(self, opportunity: Opportunity, ranked_contact: RankedContact) -> None:
         company_id = self._company_id(opportunity.company_name)
-        contact_id = self._contact_id(company_id, ranked_contact.contact.normalized_name)
+        contact_id, _ = self._resolved_contact_id(company_id, ranked_contact.contact)
         opportunity_id = self._opportunity_id(opportunity)
         self.client.table("opportunity_contacts").upsert(
             {

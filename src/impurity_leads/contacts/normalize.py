@@ -2,6 +2,7 @@ import re
 import unicodedata
 
 _HONORIFICS = {"dr", "prof", "mr", "mrs", "ms", "miss", "sir"}
+_ACADEMIC_SUFFIXES = {"phd", "md", "do", "mba", "rn", "dds", "dvm", "esq", "jd", "cpa"}
 _EMAIL_RE = re.compile(r"^[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.I)
 
 
@@ -9,7 +10,36 @@ def normalize_person_name(name: str) -> str:
     text = unicodedata.normalize("NFKC", name).casefold()
     text = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
     parts = [part for part in text.split() if part and part not in _HONORIFICS]
+    # PDF/HTML sources commonly render ``Ph.D.`` as separate tokens. Strip
+    # only terminal academic/professional suffixes; preserve initials and
+    # meaningful middle names.
+    while parts and parts[-1] in _ACADEMIC_SUFFIXES:
+        parts.pop()
+    if len(parts) >= 2 and parts[-2:] == ["ph", "d"]:
+        parts = parts[:-2]
     return " ".join(parts)
+
+
+def person_name_compatibility(canonical: str, candidate: str) -> float:
+    """Return a conservative name-only compatibility score in [0, 1].
+
+    This is a candidate-generation aid, never an authorization to merge a
+    common name without company/profile/role context.
+    """
+    expected = normalize_person_name(canonical).split()
+    observed = normalize_person_name(candidate).split()
+    if not expected or not observed:
+        return 0.0
+    if expected == observed:
+        return 1.0
+    if len(expected) >= 2 and len(observed) >= 2:
+        if expected[0] == observed[0] and observed[-1] == expected[-1][0]:
+            return 0.82
+        if observed[0] == expected[0][0] and observed[-1] == expected[-1]:
+            return 0.80
+        if expected[0] == observed[0] and expected[-1] == observed[-1]:
+            return 0.92
+    return 0.0
 
 
 def normalize_email(value: str) -> str | None:

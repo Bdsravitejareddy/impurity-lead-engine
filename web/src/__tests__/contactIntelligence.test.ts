@@ -43,6 +43,7 @@ describe('contact intelligence normalization', () => {
     const buffer = new TextEncoder().encode('BT (Keisuke Inoue) (Site Quality) ET').buffer
     const result = await extractPdfText(buffer)
     expect(result.text).toBe('')
+    expect(result.failureClass).toBe('CORRUPT_OR_UNSUPPORTED_PDF')
     expect(result.warnings.join(' ')).toMatch(/machine-readable|could not be read/i)
   })
   it('parses a realistic multi-role LinkedIn profile by section', () => {

@@ -24,6 +24,13 @@ class Settings(BaseModel):
     max_response_bytes: int = Field(default=8 * 1024 * 1024, gt=0)
     supabase_url: str | None = None
     supabase_secret_key: str | None = Field(default=None, repr=False)
+    openai_api_key: str | None = Field(default=None, repr=False)
+    ai_analysis_enabled: bool = False
+    ai_max_calls_per_research_run: int = Field(default=3, ge=0, le=20)
+    ai_max_documents_per_run: int = Field(default=5, ge=0, le=50)
+    ai_max_people_per_run: int = Field(default=10, ge=0, le=100)
+    ai_max_input_chars_per_document: int = Field(default=20000, ge=1000, le=100000)
+    ai_max_research_depth: int = Field(default=3, ge=0, le=3)
 
 
     @model_validator(mode='after')
@@ -38,7 +45,7 @@ class Settings(BaseModel):
 def load_settings() -> Settings:
     values = {}
     for name in Settings.model_fields:
-        env_name = name.upper() if name.startswith('supabase_') else 'CRAWLER_' + name.upper()
+        env_name = name.upper() if name.startswith(('supabase_', 'openai_', 'ai_')) else 'CRAWLER_' + name.upper()
         value = os.getenv(env_name)
         if value:
             values[name] = value
