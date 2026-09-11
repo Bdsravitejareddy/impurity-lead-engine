@@ -14,5 +14,14 @@ export async function loadLocalData() {
       })
     }
   } catch { /* supplemental local intelligence is optional */ }
+  const seen = new Map<string, any>()
+  ;(data.leads ?? []).forEach((lead: any) => (lead.contacts ?? []).forEach((contact: any) => {
+    const key = `${String(contact.name || '').toLowerCase()}::${String(lead.account?.company || '').toLowerCase()}`
+    const existing = seen.get(key)
+    const opportunityCount = (existing?.linked_opportunities || 0) + 1
+    seen.set(key, { ...(existing || contact), id: contact.id || `local-${key}`, company: lead.account?.company || 'Unknown company', linked_opportunities: opportunityCount, sources: new Set([...(existing?.evidence_urls || []), ...(contact.evidence_urls || [])]).size, quality: contact.role_fit_score || contact.confidence || 0, current_role_confidence: contact.confidence || 0, contactability: contact.email_status || (contact.profile_url ? 'PROFESSIONAL' : 'UNKNOWN'), last_verified: contact.last_verified_at || null })
+  }))
+  data.canonicalContacts = Array.from(seen.values()).map((item: any) => ({ ...item, display_name: item.display_name || item.name }))
+  data.pipeline = data.pipeline || {}
   return data
 }
