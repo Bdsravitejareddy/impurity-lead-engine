@@ -21,5 +21,5 @@ if __name__ == "__main__":
         result = run_pending_targeted_jobs(load_settings(), limit=10)
         print(json.dumps({"event": "targeted_research", **result}, sort_keys=True))
     except Exception as exc:
-        print(json.dumps({"event": "targeted_research_failed", "error": type(exc).__name__}, sort_keys=True))
+        print(json.dumps({"event": "targeted_research_failed", "error": type(exc).__name__, "message": str(exc)[:240]}, sort_keys=True))
     raise SystemExit(exit_code)
