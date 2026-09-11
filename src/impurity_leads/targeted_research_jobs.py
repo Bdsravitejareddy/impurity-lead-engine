@@ -11,6 +11,7 @@ from impurity_leads.research_discovery import DiscoveryProvider, EuropePmcProvid
 from impurity_leads.targeted_research import OpportunityCoverage, evaluate_opportunity_coverage, targeted_query_plan
 from impurity_leads.person_discovery import affiliation_matches_company, candidate_identity_state, extract_authors, rank_candidate
 from impurity_leads.contacts.normalize import normalize_person_name
+from impurity_leads.agent_research import queue_agent_research_job
 
 
 def _now() -> str:
@@ -152,6 +153,23 @@ def process_targeted_job(client: Any, job: dict[str, Any], opportunity: dict[str
             result = {"status": "PARTIAL", "stop_reason": "PROVIDER_ERROR", "sources": 0, "claims": 0, "relationships": 0, "error": type(exc).__name__}
     if job_id:
         client.table("targeted_research_jobs").update({"status": result["status"], "completed_at": _now(), "metrics": result, "stop_reason": result["stop_reason"]}).eq("id", job_id).execute()
+    # Deterministic research remains the first line.  When it stops without
+    # satisfying coverage, hand only the unresolved dimensions to the human
+    # ChatGPT Work bridge; never create a Work job for a qualified opportunity.
+    final_coverage = evaluate_opportunity_coverage(opportunity, contacts, config=config)
+    if final_coverage.coverage_status != "QUALIFIED" and result.get("stop_reason") in {"NO_NEW_EVIDENCE", "DIMINISHING_RETURNS", "MAX_ROUNDS", "PROVIDER_ERROR"}:
+        agent_job = queue_agent_research_job(
+            client,
+            targeted_job=job,
+            opportunity=opportunity,
+            missing_dimensions=final_coverage.missing_dimensions,
+            quality_before={"best_contact_score": final_coverage.best_contact_score, "coverage_status": final_coverage.coverage_status, "identity_coverage": final_coverage.identity_coverage, "technical_coverage": final_coverage.technical_relevance_coverage},
+            known_entities={"company": opportunity.get("company_name") or opportunity.get("company"), "molecule": opportunity.get("molecule_name") or opportunity.get("molecule"), "opportunity_score": opportunity.get("score")},
+            priority=int(opportunity.get("score") or job.get("priority") or 0),
+            stop_reason=result.get("stop_reason"),
+        )
+        result["agent_research_job_id"] = agent_job.get("id") if agent_job else None
+        result["agent_research_status"] = agent_job.get("status") if agent_job else None
     return result
 
 
