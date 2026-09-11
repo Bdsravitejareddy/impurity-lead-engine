@@ -14,8 +14,21 @@ from urllib.parse import urlparse
 OUTPUT_SCHEMA = {
     "job_id": "string",
     "research_summary": "string",
-    "people": "array of people with claims and technical_work",
-    "sources": "array of source records",
+    "people": [{
+        "full_name": "string",
+        "aliases": ["string"],
+        "current_company": "string|null",
+        "current_title": "string|null",
+        "business_location": "string|null",
+        "identity_confidence": 0,
+        "technical_relevance": 0,
+        "contactability": {"status": "UNKNOWN", "email": None, "phone": None, "professional_profile_url": None},
+        "claims": [{"claim": "string", "claim_type": "string", "proposed_provenance": "OBSERVED|INFERRED", "confidence": 0, "source_urls": ["https://..."]}],
+        "technical_work": [{"title": "string", "type": "PUBLICATION|PATENT|CONFERENCE|PROJECT|OTHER", "date": None, "molecule": None, "impurity": None, "technical_topic": None, "source_urls": ["https://..."]}],
+        "why_relevant_to_opportunity": "string",
+        "source_urls": ["https://..."]
+    }],
+    "sources": [{"url": "https://...", "title": "string", "publisher": "string", "source_date": None, "source_type": "string", "suggested_source_class": "PRIMARY|STRONG_PROFESSIONAL|DIRECTORY|DISCOVERY_WEAK", "access_status": "PUBLIC|BLOCKED_AUTH|FAILED", "claims_supported": ["string"]}],
     "missing_dimensions_resolved": "array of strings",
     "remaining_unknowns": "array of strings",
     "recommended_next_queries": "array of strings",
@@ -26,8 +39,10 @@ ACTIVE_AGENT_STATUSES = {"QUEUED", "READY", "EXPORTED", "RESULT_SUBMITTED", "VAL
 
 def build_agent_research_prompt(job: dict[str, Any]) -> str:
     """Build one bounded, copyable Work prompt from a READY job."""
-    company = job.get("company") or job.get("company_name") or "Unknown company"
-    molecule = job.get("molecule") or job.get("molecule_name") or "Unknown molecule"
+    known_entities = job.get("known_entities") or {}
+    company = job.get("company") or job.get("company_name") or known_entities.get("company") or "Unknown company"
+    molecule = job.get("molecule") or job.get("molecule_name") or known_entities.get("molecule") or "Unknown molecule"
+    opportunity_score = job.get("opportunity_score", known_entities.get("opportunity_score", "UNKNOWN"))
     missing = job.get("missing_dimensions") or []
     return f"""Use Work mode with web research. Return only the requested JSON, with no markdown.
 
@@ -36,7 +51,7 @@ You are assisting SVAK Intelligence with a bounded research task.
 Opportunity
 - Company: {company}
 - Molecule/product: {molecule}
-- Opportunity score: {job.get('opportunity_score', 'UNKNOWN')}
+- Opportunity score: {opportunity_score}
 - Research goal: {job.get('research_goal', 'Resolve missing contact dimensions')}
 - Missing dimensions: {json.dumps(missing)}
 

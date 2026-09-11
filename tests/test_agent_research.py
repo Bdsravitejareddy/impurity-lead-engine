@@ -37,7 +37,7 @@ def test_alias_dedupe_key_is_stable():
 
 
 def test_prompt_is_bounded_and_restricts_agent():
-    prompt = build_agent_research_prompt({"company": "Cipla", "molecule": "Cobimetinib", "missing_dimensions": ["PERSON_IDENTITY"], "opportunity_score": 94})
+    prompt = build_agent_research_prompt({"known_entities": {"company": "Cipla", "molecule": "Cobimetinib", "opportunity_score": 94}, "missing_dimensions": ["PERSON_IDENTITY"]})
     assert "Cipla" in prompt and "Cobimetinib" in prompt
     assert "Do not bypass authentication" in prompt
     assert "source_urls" in prompt
@@ -69,4 +69,3 @@ def test_masked_email_cannot_be_verified_public():
 def test_invalid_json_is_rejected_safely():
     result = validate_agent_submission("{bad", job_id="job-1")
     assert result["valid"] is False
-
