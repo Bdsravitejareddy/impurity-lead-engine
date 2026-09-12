@@ -212,8 +212,12 @@ def _entity_id(client: Any, entity_type: str, name: str, metadata: dict[str, Any
         return None
     normalized = normalize_person_name(name)
     try:
-        response = client.table("research_entities").upsert({"entity_type": entity_type, "canonical_name": name[:500], "normalized_name": normalized, "metadata_json": metadata or {}}, on_conflict="entity_type,normalized_name").execute()
+        response = client.table("research_entities").upsert({"entity_type": entity_type, "canonical_name": name[:500], "normalized_name": normalized, "metadata_json": metadata or {}}, on_conflict="entity_type,normalized_name").select("id").execute()
         rows = getattr(response, "data", None) or []
+        if rows:
+            return rows[0].get("id")
+        lookup = client.table("research_entities").select("id").eq("entity_type", entity_type).eq("normalized_name", normalized).limit(1).execute()
+        rows = getattr(lookup, "data", None) or []
         if rows:
             return rows[0].get("id")
     except Exception:
@@ -239,7 +243,7 @@ def apply_validated_agent_research(client: Any, *, job: dict[str, Any], validate
     except Exception:
         pass
     sources_by_url = {str(source.get("url")): source for source in data.get("sources") or [] if _url_ok(source.get("url"))}
-    metrics = {"people_proposed": len(data.get("people") or []), "sources_proposed": len(sources_by_url), "sources_accepted": 0, "sources_rejected": 0, "people_canonicalised": 0, "contacts_created": 0, "duplicates_prevented": 0, "claims_accepted": 0, "works_accepted": 0}
+    metrics = {"people_proposed": len(data.get("people") or []), "sources_proposed": len(sources_by_url), "sources_accepted": 0, "sources_rejected": 0, "people_canonicalised": 0, "contacts_created": 0, "duplicates_prevented": 0, "claims_accepted": 0, "works_accepted": 0, "graph_entities": 0, "graph_relationships": 0}
     source_ids: dict[str, str] = {}
     for url, source in sources_by_url.items():
         # URL validation is intentionally conservative; the underlying page is
@@ -276,6 +280,10 @@ def apply_validated_agent_research(client: Any, *, job: dict[str, Any], validate
             continue
         metrics["people_canonicalised"] += 1
         contact_id = contact["id"]
+        person_entity_id = _entity_id(client, "PERSON", name, {"contact_id": contact_id, "source_channel": "CHATGPT_WORK_GITHUB"})
+        opportunity_entity_id = _entity_id(client, "OPPORTUNITY", opportunity_id, {"opportunity_id": opportunity_id})
+        if person_entity_id: metrics["graph_entities"] += 1
+        if opportunity_entity_id: metrics["graph_entities"] += 1
         urls = set(str(value) for value in person.get("source_urls") or [] if _url_ok(value))
         for claim in person.get("claims") or []:
             urls.update(str(value) for value in claim.get("source_urls") or [] if _url_ok(value))
@@ -288,6 +296,12 @@ def apply_validated_agent_research(client: Any, *, job: dict[str, Any], validate
                 if rows: ids.append(rows[0]["id"])
             except Exception:
                 continue
+        if person_entity_id and opportunity_entity_id:
+            try:
+                client.table("research_relationships").upsert({"from_entity_id": person_entity_id, "to_entity_id": opportunity_entity_id, "relationship_type": "LINKED_TO", "source_ids": ids, "confidence": identity / 100, "provenance": "OBSERVED"}, on_conflict="from_entity_id,to_entity_id,relationship_type").execute()
+                metrics["graph_relationships"] += 1
+            except Exception:
+                pass
         for claim in person.get("claims") or []:
             text = str(claim.get("claim") or "").strip()
             if not text: continue
@@ -305,6 +319,16 @@ def apply_validated_agent_research(client: Any, *, job: dict[str, Any], validate
                 metrics["works_accepted"] += 1
             except Exception:
                 pass
+            work_type = str(work.get("type") or "OTHER").upper()
+            entity_type = "PATENT" if work_type == "PATENT" else "PUBLICATION" if work_type == "PUBLICATION" else "OTHER"
+            work_entity_id = _entity_id(client, entity_type, title, {"contact_id": contact_id, "opportunity_id": opportunity_id, "source_ids": ids})
+            if work_entity_id: metrics["graph_entities"] += 1
+            if work_entity_id and person_entity_id:
+                try:
+                    client.table("research_relationships").upsert({"from_entity_id": person_entity_id, "to_entity_id": work_entity_id, "relationship_type": "INVENTOR_ON" if entity_type == "PATENT" else "AUTHORED" if entity_type == "PUBLICATION" else "WORKED_ON", "source_ids": ids, "confidence": max(0.0, min(1.0, float(person.get("technical_relevance") or 50) / 100)), "provenance": "OBSERVED"}, on_conflict="from_entity_id,to_entity_id,relationship_type").execute()
+                    metrics["graph_relationships"] += 1
+                except Exception:
+                    pass
         try:
             link_reason = "CHATGPT_WORK; " + ("PATENT_INVENTOR" if any(str(work.get("type") or "").upper() == "PATENT" for work in person.get("technical_work") or []) else "TECHNICAL_WORK")
             client.table("opportunity_contacts").upsert(opportunity_contact_link_payload(opportunity_id=opportunity_id, contact_id=contact_id, identity_confidence=person.get("identity_confidence"), source_ids=ids, rationale=link_reason), on_conflict="opportunity_id,contact_id").execute()
