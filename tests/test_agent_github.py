@@ -28,6 +28,12 @@ def test_issue_body_contains_bounded_machine_payload_and_no_secret():
     assert error is None and payload["agent_job_id"] == "job-1"
 
 
+def test_molecule_issue_payload_is_job_kind_aware():
+    payload = build_issue_payload({"id": "job-m", "job_kind": "MOLECULE_INTELLIGENCE", "molecule_id": "mol-1", "known_entities": {"molecule": "Cobimetinib"}})
+    assert payload["job_kind"] == "MOLECULE_INTELLIGENCE"
+    assert payload["molecule_id"] == "mol-1"
+
+
 def test_marked_work_result_extracts_only_json():
     result = {"job_id": "job-1", "people": [], "sources": []}
     value, error = extract_marked_json(f"noise\n{WORK_RESULT_START}\n{{\"job_id\":\"job-1\",\"people\":[],\"sources\":[]}}\n{WORK_RESULT_END}\nnoise")

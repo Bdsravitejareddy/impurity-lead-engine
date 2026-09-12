@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from uuid import NAMESPACE_URL, uuid5
 
 from impurity_leads.contacts.normalize import normalize_person_name, person_name_compatibility
+from impurity_leads.molecule_intelligence import apply_molecule_sections, normalize_claim_type
 
 
 OUTPUT_SCHEMA = {
@@ -36,6 +37,13 @@ OUTPUT_SCHEMA = {
     "missing_dimensions_resolved": "array of strings",
     "remaining_unknowns": "array of strings",
     "recommended_next_queries": "array of strings",
+}
+
+MOLECULE_OUTPUT_SCHEMA = {
+    "job_id": "string", "job_kind": "MOLECULE_INTELLIGENCE", "research_summary": "string",
+    "molecule": {"canonical_name": "string", "claims": [{"claim": "string", "claim_type": "string", "proposed_provenance": "OBSERVED|INFERRED", "confidence": 0, "source_urls": ["https://..."]}]},
+    "sources": OUTPUT_SCHEMA["sources"], "missing_dimensions_resolved": "array of strings",
+    "remaining_unknowns": "array of strings", "recommended_next_queries": "array of strings",
 }
 
 ACTIVE_AGENT_STATUSES = {"QUEUED", "READY", "EXPORTED", "RESULT_SUBMITTED", "VALIDATING"}
@@ -65,9 +73,13 @@ def build_agent_research_prompt(job: dict[str, Any]) -> str:
     molecule = job.get("molecule") or job.get("molecule_name") or known_entities.get("molecule") or "Unknown molecule"
     opportunity_score = job.get("opportunity_score", known_entities.get("opportunity_score", "UNKNOWN"))
     missing = job.get("missing_dimensions") or []
+    job_kind = str(job.get("job_kind") or "CONTACT_RESEARCH")
+    schema = MOLECULE_OUTPUT_SCHEMA if job_kind == "MOLECULE_INTELLIGENCE" else OUTPUT_SCHEMA
     return f"""Use Work mode with web research. Return only the requested JSON, with no markdown.
 
 You are assisting SVAK Intelligence with a bounded research task.
+
+Research kind: {job_kind}
 
 Opportunity
 - Company: {company}
@@ -92,16 +104,17 @@ emails. If a promising source is blocked, return access_status BLOCKED_AUTH.
 Unknown values must be null or UNKNOWN. Do not manufacture sources or claims.
 
 Return JSON matching this shape exactly:
-{json.dumps(OUTPUT_SCHEMA, indent=2)}
+{json.dumps(schema, indent=2)}
 
 Each claim must include proposed_provenance OBSERVED or INFERRED and source_urls.
 Masked or inferred emails must not be marked VERIFIED_PUBLIC.
 """
 
 
-def active_agent_dedupe_key(opportunity_id: str, missing_dimensions: list[str]) -> str:
+def active_agent_dedupe_key(opportunity_id: str | None, missing_dimensions: list[str], *, job_kind: str = "CONTACT_RESEARCH", molecule_id: str | None = None) -> str:
     dims = ",".join(sorted({str(item).strip().upper() for item in missing_dimensions if str(item).strip()}))
-    return f"{opportunity_id}:{dims or 'GENERAL'}"
+    prefix = f"molecule:{molecule_id}" if job_kind == "MOLECULE_INTELLIGENCE" else str(opportunity_id or "")
+    return f"{prefix}:{dims or 'GENERAL'}"
 
 
 def queue_agent_research_job(client: Any, *, targeted_job: dict[str, Any], opportunity: dict[str, Any],
@@ -156,6 +169,39 @@ def queue_agent_research_job(client: Any, *, targeted_job: dict[str, Any], oppor
             return None
 
 
+def queue_molecule_intelligence_job(client: Any, *, molecule: dict[str, Any], missing_dimensions: list[str], quality_before: dict[str, Any], priority: int = 0, known_sources: list[dict[str, Any]] | None = None, known_claims: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+    """Queue one bounded canonical molecule job, independent of companies."""
+    molecule_id = str(molecule.get("id") or molecule.get("molecule_id") or "")
+    if not molecule_id:
+        return None
+    dimensions = sorted({str(item).upper() for item in missing_dimensions if str(item).strip()})
+    if not dimensions:
+        return None
+    dedupe_key = active_agent_dedupe_key(None, dimensions, job_kind="MOLECULE_INTELLIGENCE", molecule_id=molecule_id)
+    job = {
+        "job_kind": "MOLECULE_INTELLIGENCE", "molecule_id": molecule_id, "opportunity_id": None,
+        "priority": int(priority), "research_goal": f"Resolve only molecule dimensions: {', '.join(dimensions)}",
+        "missing_dimensions": dimensions, "known_entities": {"molecule": molecule.get("canonical_name") or molecule.get("name"), "molecule_id": molecule_id},
+        "known_contacts": [], "known_sources": known_sources or [], "known_claims": known_claims or [], "quality_before": quality_before or {},
+        "dedupe_key": dedupe_key, "status": "READY",
+    }
+    job["agent_prompt"] = build_agent_research_prompt(job)
+    try:
+        existing = client.table("agent_research_jobs").select("*").eq("dedupe_key", dedupe_key).in_("status", list(ACTIVE_AGENT_STATUSES)).limit(1).execute()
+        rows = getattr(existing, "data", None) or []
+        if rows:
+            return rows[0]
+        response = client.table("agent_research_jobs").insert(job).execute()
+        rows = getattr(response, "data", None) or []
+        return rows[0] if rows else job
+    except Exception:
+        try:
+            rows = client.table("agent_research_jobs").select("*").eq("dedupe_key", dedupe_key).limit(1).execute().data or []
+            return rows[0] if rows else None
+        except Exception:
+            return None
+
+
 def _url_ok(value: Any) -> bool:
     try:
         parsed = urlparse(str(value))
@@ -164,7 +210,7 @@ def _url_ok(value: Any) -> bool:
         return False
 
 
-def validate_agent_submission(payload: Any, *, job_id: str, seen_submission: bool = False) -> dict[str, Any]:
+def validate_agent_submission(payload: Any, *, job_id: str, seen_submission: bool = False, job_kind: str = "CONTACT_RESEARCH") -> dict[str, Any]:
     """Validate safely; return partial accepted data plus field errors."""
     if isinstance(payload, str):
         try:
@@ -178,6 +224,27 @@ def validate_agent_submission(payload: Any, *, job_id: str, seen_submission: boo
         errors.append({"path": "job_id", "message": "does not match staged job"})
     if seen_submission:
         errors.append({"path": "$", "message": "duplicate submission"})
+    actual_kind = str(payload.get("job_kind") or job_kind)
+    if actual_kind not in {"CONTACT_RESEARCH", "MOLECULE_INTELLIGENCE"}:
+        errors.append({"path": "job_kind", "message": "unsupported job kind"})
+    if actual_kind == "MOLECULE_INTELLIGENCE":
+        molecule = payload.get("molecule") if isinstance(payload.get("molecule"), dict) else {}
+        if not str(molecule.get("canonical_name") or "").strip():
+            errors.append({"path": "molecule.canonical_name", "message": "canonical molecule name required"})
+        clean_claims = []
+        for index, claim in enumerate(molecule.get("claims") or []):
+            if not isinstance(claim, dict) or not str(claim.get("claim") or "").strip():
+                errors.append({"path": f"molecule.claims[{index}]", "message": "claim required"})
+                continue
+            clean_claim = dict(claim)
+            clean_claim["source_urls"] = list(dict.fromkeys(str(url) for url in clean_claim.get("source_urls") or [] if _url_ok(url)))
+            if clean_claim.get("proposed_provenance") == "OBSERVED" and not clean_claim.get("source_urls"):
+                clean_claim["proposed_provenance"] = "INFERRED"
+                errors.append({"path": f"molecule.claims[{index}]", "message": "source-free OBSERVED claim downgraded to INFERRED"})
+            clean_claims.append(clean_claim)
+        clean_sources = [dict(source) for source in (payload.get("sources") or []) if isinstance(source, dict) and _url_ok(source.get("url"))]
+        data = {**payload, "job_id": str(job_id), "job_kind": actual_kind, "molecule": {**molecule, "claims": clean_claims}, "sources": clean_sources}
+        return {"valid": not errors, "errors": errors, "data": data}
     people = payload.get("people") if isinstance(payload.get("people"), list) else []
     sources = payload.get("sources") if isinstance(payload.get("sources"), list) else []
     clean_people: list[dict[str, Any]] = []
@@ -193,9 +260,11 @@ def validate_agent_submission(payload: Any, *, job_id: str, seen_submission: boo
             errors.append({"path": f"people[{index}].contactability", "message": "masked or inferred email cannot be VERIFIED_PUBLIC"})
         clean["contactability"] = contactability
         for claim in clean.get("claims") or []:
-            if isinstance(claim, dict) and claim.get("proposed_provenance") == "OBSERVED" and not claim.get("source_urls"):
-                claim["proposed_provenance"] = "INFERRED"
-                errors.append({"path": f"people[{index}].claims", "message": "source-free OBSERVED claim downgraded to INFERRED"})
+            if isinstance(claim, dict):
+                claim["source_urls"] = list(dict.fromkeys(str(url) for url in claim.get("source_urls") or [] if _url_ok(url)))
+                if claim.get("proposed_provenance") == "OBSERVED" and not claim["source_urls"]:
+                    claim["proposed_provenance"] = "INFERRED"
+                    errors.append({"path": f"people[{index}].claims", "message": "source-free OBSERVED claim downgraded to INFERRED"})
         clean_people.append(clean)
     clean_sources: list[dict[str, Any]] = []
     for index, source in enumerate(sources):
@@ -225,6 +294,34 @@ def _entity_id(client: Any, entity_type: str, name: str, metadata: dict[str, Any
     return None
 
 
+def _apply_molecule_research(client: Any, *, job: dict[str, Any], validated: dict[str, Any]) -> dict[str, Any]:
+    data = validated.get("data") or {}
+    molecule = data.get("molecule") or {}
+    molecule_id = str(job.get("molecule_id") or "")
+    if not molecule_id:
+        return {"status": "PARTIAL", "rejected": ["molecule_id_missing"]}
+    entity_id = _entity_id(client, "MOLECULE", str(molecule.get("canonical_name") or "Unknown molecule"), {"molecule_id": molecule_id})
+    claims = []
+    for claim in molecule.get("claims") or []:
+        text = str(claim.get("claim") or "").strip()
+        if not text:
+            continue
+        source_urls = [str(url) for url in claim.get("source_urls") or [] if _url_ok(url)]
+        provenance = "OBSERVED" if source_urls and claim.get("proposed_provenance") == "OBSERVED" else "INFERRED"
+        claim_id = str(uuid5(NAMESPACE_URL, f"svak:molecule-claim:{molecule_id}:{normalize_claim_type(claim.get('claim_type'))}:{text}"))
+        row = {"id": claim_id, "entity_id": entity_id, "claim_type": normalize_claim_type(claim.get("claim_type")), "claim_text": text, "source_url": source_urls[0] if source_urls else None, "source_class": "PRIMARY" if source_urls else "DISCOVERY_WEAK", "attribution": "MOLECULE_CONTEXT", "provenance": provenance, "confidence": max(0.0, min(1.0, float(claim.get("confidence") or 0.5)))}
+        try:
+            client.table("research_claims").upsert(row, on_conflict="id").execute()
+            claims.append(row)
+        except Exception:
+            claims.append({"id": None, **row})
+    try:
+        section_metrics = apply_molecule_sections(client, molecule_id, claims)
+    except Exception as exc:
+        section_metrics = {"sections_written": 0, "error": type(exc).__name__}
+    return {"status": "APPLIED" if claims else "PARTIAL", "molecule_id": molecule_id, "claims_accepted": len(claims), "graph_entities": 1 if entity_id else 0, **section_metrics}
+
+
 def apply_validated_agent_research(client: Any, *, job: dict[str, Any], validated: dict[str, Any]) -> dict[str, Any]:
     """Apply only structurally valid, source-attributed findings.
 
@@ -232,6 +329,8 @@ def apply_validated_agent_research(client: Any, *, job: dict[str, Any], validate
     independently succeeded. All writes are idempotent by stable contact/source
     keys and equivalent claim checks.
     """
+    if str(job.get("job_kind") or "CONTACT_RESEARCH") == "MOLECULE_INTELLIGENCE":
+        return _apply_molecule_research(client, job=job, validated=validated)
     data = validated.get("data") or {}
     opportunity_id = str(job.get("opportunity_id") or "")
     known = job.get("known_entities") or {}

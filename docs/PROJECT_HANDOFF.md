@@ -220,3 +220,10 @@ The next safe step is to run an authenticated browser acceptance pass against `h
 - Added contact evidence columns (`candidate_status`, `identity_reason`, `technical_relevance`, `quality_diagnostics`) and diagnostics explaining person-direct evidence versus title fallback.
 - Live Roche/cobimetinib workflow `34589368911` found one public technical source and one graph relationship, but the returned public record did not include a target-company-affiliated author, so no contact was safely created or linked. This is an honest partial live result; no duplicate contact was created.
 - Latest validation: backend `250 passed`, integration remains `14 passed`, frontend `32 passed`, build and diff check passed. OpenAI remains disabled.
+## Company-centric opportunities and molecule intelligence (2026-09-12)
+
+- Opportunities are now grouped by canonical `company_id` in the frontend read model. One company row contains all child molecule opportunities, preserving child-level filtering/search, explicit `opportunity_contacts` primary contacts, signal counts, score/priority sorting, and evidence dates.
+- Molecule detail is linkable at `/molecules/:moleculeId`. It renders reusable section records with `SUPPORTED`, `PARTIAL`, or `UNKNOWN` evidence states and never treats a generated summary as a source.
+- Migration `20260912150000_molecule_intelligence.sql` adds typed `research_claims.claim_type`, permits `MOLECULE_CONTEXT`, adds RLS-protected `molecule_intelligence_sections`, and generalises `agent_research_jobs` with `job_kind`/`molecule_id` constraints. Existing contact jobs remain valid.
+- `queue_molecule_intelligence_job`, molecule-aware Work prompts/validation, and deterministic section generation reuse the existing GitHub staging/message bus. Source-backed claims are persisted to the research graph; summaries retain supporting claim IDs. OpenAI is not required.
+- Production migration verification confirmed the new table and job/claim graph tables retain RLS. Existing contact research and crawler flows remain unchanged.

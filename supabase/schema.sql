@@ -468,3 +468,23 @@ begin
     execute format('grant execute on function %s to service_role',f);
   end loop;
 end $$;
+-- Molecule intelligence is defined additively in
+-- migrations/20260912150000_molecule_intelligence.sql. Keep this schema
+-- snapshot aligned for fresh environments.
+alter table if exists public.research_claims add column if not exists claim_type text not null default 'OTHER';
+alter table if exists public.research_claims drop constraint if exists research_claims_attribution_check;
+alter table if exists public.research_claims add constraint research_claims_attribution_check check (attribution in ('PERSON_DIRECT','COMPANY_CONTEXT','OPPORTUNITY_CONTEXT','MOLECULE_CONTEXT'));
+create table if not exists public.molecule_intelligence_sections (
+  id uuid primary key default gen_random_uuid(), molecule_id uuid not null references public.molecules(id) on delete cascade,
+  section_type text not null, summary_text text not null, supporting_claim_ids uuid[] not null default '{}',
+  evidence_status text not null default 'UNKNOWN', source_count integer not null default 0, confidence numeric not null default 0,
+  generated_at timestamptz not null default now(), generation_version integer not null default 1, updated_at timestamptz not null default now(),
+  unique(molecule_id, section_type)
+);
+alter table public.molecule_intelligence_sections enable row level security;
+revoke all on public.molecule_intelligence_sections from anon;
+grant select on public.molecule_intelligence_sections to authenticated;
+grant all on public.molecule_intelligence_sections to service_role;
+alter table if exists public.agent_research_jobs add column if not exists job_kind text not null default 'CONTACT_RESEARCH';
+alter table if exists public.agent_research_jobs add column if not exists molecule_id uuid references public.molecules(id) on delete cascade;
+alter table if exists public.agent_research_jobs alter column opportunity_id drop not null;

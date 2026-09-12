@@ -12,6 +12,8 @@ from impurity_leads.targeted_research import OpportunityCoverage, evaluate_oppor
 from impurity_leads.person_discovery import affiliation_matches_company, candidate_identity_state, extract_authors, rank_candidate
 from impurity_leads.contacts.normalize import normalize_person_name
 from impurity_leads.agent_research import queue_agent_research_job
+from impurity_leads.agent_research import queue_molecule_intelligence_job
+from impurity_leads.molecule_intelligence import missing_molecule_dimensions
 
 
 def _now() -> str:
@@ -185,7 +187,7 @@ def run_pending_targeted_jobs(settings: Any, *, limit: int = 10, provider: Disco
         jobs = client.table("targeted_research_jobs").select("*").eq("status", "QUEUED").order("priority", desc=True).limit(limit).execute().data or []
     except Exception:
         return {"status": "SKIPPED", "reason": "targeted_jobs_table_unavailable", "processed": 0}
-    result = {"status": "COMPLETED", "processed": 0, "sources": 0, "claims": 0, "relationships": 0, "stop_reasons": {}}
+    result = {"status": "COMPLETED", "processed": 0, "sources": 0, "claims": 0, "relationships": 0, "stop_reasons": {}, "molecule_jobs_queued": 0}
     for job in jobs:
         opportunity_rows = client.table("opportunities").select("*").eq("id", job["opportunity_id"]).limit(1).execute().data or []
         if not opportunity_rows:
@@ -205,4 +207,27 @@ def run_pending_targeted_jobs(settings: Any, *, limit: int = 10, provider: Disco
         result["claims"] += metrics.get("claims", 0)
         result["relationships"] += metrics.get("relationships", 0)
         result["stop_reasons"][metrics.get("stop_reason", "UNKNOWN")] = result["stop_reasons"].get(metrics.get("stop_reason", "UNKNOWN"), 0) + 1
+    # Molecule intelligence is canonical across companies. Queue at most one
+    # bounded Work job per distinct molecule attached to a high-value
+    # opportunity, and only for unsupported sections.
+    try:
+        high_value = client.table("opportunities").select("id,molecule_id,score,priority").in_("priority", ["HOT", "HIGH"]).order("score", desc=True).limit(20).execute().data or []
+        seen_molecules: set[str] = set()
+        for opportunity in high_value:
+            molecule_id = str(opportunity.get("molecule_id") or "")
+            if not molecule_id or molecule_id in seen_molecules:
+                continue
+            seen_molecules.add(molecule_id)
+            molecule_rows = client.table("molecules").select("id,canonical_name").eq("id", molecule_id).limit(1).execute().data or []
+            if not molecule_rows:
+                continue
+            sections = client.table("molecule_intelligence_sections").select("section_type,evidence_status").eq("molecule_id", molecule_id).execute().data or []
+            dimensions = missing_molecule_dimensions(sections)
+            if dimensions:
+                job = queue_molecule_intelligence_job(client, molecule=molecule_rows[0], missing_dimensions=dimensions, quality_before={"sections_supported": len(sections)}, priority=int(opportunity.get("score") or 0))
+                result["molecule_jobs_queued"] += 1 if job else 0
+    except Exception:
+        # Older deployments without the additive molecule table continue with
+        # deterministic contact/opportunity research unchanged.
+        pass
     return result

@@ -22,6 +22,8 @@ export async function loadLocalData() {
     seen.set(key, { ...(existing || contact), id: contact.id || `local-${key}`, company: lead.account?.company || 'Unknown company', linked_opportunities: opportunityCount, sources: new Set([...(existing?.evidence_urls || []), ...(contact.evidence_urls || [])]).size, quality: contact.role_fit_score || contact.confidence || 0, current_role_confidence: contact.confidence || 0, contactability: contact.email_status || (contact.profile_url ? 'PROFESSIONAL' : 'UNKNOWN'), last_verified: contact.last_verified_at || null })
   }))
   data.canonicalContacts = Array.from(seen.values()).map((item: any) => ({ ...item, display_name: item.display_name || item.name }))
+  data.leads = (data.leads ?? []).map((lead: any) => ({ ...lead, account: { ...(lead.account || {}), company_id: lead.account?.company_id || lead.account?.company || 'local-company' }, opportunity: { ...(lead.opportunity || {}), company_id: lead.account?.company_id || lead.account?.company || 'local-company', molecule_id: lead.opportunity?.molecule_id || lead.opportunity?.molecule } }))
+  data.moleculeIntelligence = data.moleculeIntelligence || Object.fromEntries((data.leads ?? []).flatMap((lead: any) => (lead.moleculeIntelligence || []).length ? [[lead.opportunity.molecule_id, lead.moleculeIntelligence]] : []))
   data.pipeline = data.pipeline || {}
   return data
 }

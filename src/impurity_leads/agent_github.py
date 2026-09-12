@@ -21,9 +21,12 @@ MAX_COMMENT_CHARS = 200_000
 
 def build_issue_payload(job: dict[str, Any]) -> dict[str, Any]:
     known = job.get("known_entities") or {}
+    job_kind = str(job.get("job_kind") or "CONTACT_RESEARCH")
     return {
         "agent_job_id": str(job.get("id") or ""),
+        "job_kind": job_kind,
         "opportunity_id": str(job.get("opportunity_id") or ""),
+        "molecule_id": str(job.get("molecule_id") or known.get("molecule_id") or ""),
         "company": known.get("company") or job.get("company") or "UNKNOWN",
         "molecule": known.get("molecule") or job.get("molecule") or "UNKNOWN",
         "opportunity_score": known.get("opportunity_score", job.get("priority")),
@@ -100,7 +103,9 @@ def export_ready_agent_jobs(client: Any, *, repo: str, limit: int = 5) -> dict[s
     exported = []
     errors = []
     for job in rows:
-        title = f"[SVAK Research] {job.get('known_entities', {}).get('company', 'Opportunity')} / {job.get('known_entities', {}).get('molecule', 'Molecule')} / {','.join(job.get('missing_dimensions') or [])}"
+        kind = str(job.get("job_kind") or "CONTACT_RESEARCH")
+        title = f"[SVAK Research] {job.get('known_entities', {}).get('company', 'Molecule')} / {job.get('known_entities', {}).get('molecule', 'Molecule')} / {','.join(job.get('missing_dimensions') or [])}"
+        if kind == "MOLECULE_INTELLIGENCE": title = f"[SVAK Molecule] {job.get('known_entities', {}).get('molecule', 'Molecule')} / {','.join(job.get('missing_dimensions') or [])}"
         try:
             for label in ("svak-work-ready", "svak-research", "priority-high" if int(job.get("priority") or 0) >= 85 else "priority-normal"):
                 try:

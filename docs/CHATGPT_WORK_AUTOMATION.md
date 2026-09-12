@@ -64,3 +64,17 @@ then writes canonical Contact 360 and graph records. Invalid or duplicate
 comments are rejected safely. A successful result receives a machine-generated
 validation comment and the issue is labelled `svak-work-applied` and closed;
 unresolved work remains open with a follow-up label.
+# Molecule intelligence jobs
+
+The same private GitHub issue transport also carries `MOLECULE_INTELLIGENCE`
+jobs. These jobs have `molecule_id` and no `opportunity_id`; the issue payload
+contains the canonical molecule and only missing dimensions such as
+`CLINICAL_SAFETY`, `TOXICOLOGY`, or `IMPURITY_RELEVANCE`. Return the
+job-kind-aware molecule schema from `src/impurity_leads/agent_research.py`.
+
+Molecule results enter the same staging table and deterministic validator as
+contact results. A source-free `OBSERVED` claim is downgraded to `INFERRED`;
+the Work response itself is never evidence. Accepted claims become
+`research_claims` with `MOLECULE_CONTEXT` attribution and drive reusable
+`molecule_intelligence_sections` for every company opportunity sharing that
+molecule.
