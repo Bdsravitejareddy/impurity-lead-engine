@@ -111,8 +111,14 @@ def select_ready_agent_jobs(rows: list[dict[str, Any]], *, limit: int = 5, conta
 
 def export_ready_agent_jobs(client: Any, *, repo: str, limit: int = 5) -> dict[str, Any]:
     """Export READY jobs once. GitHub failures remain observable and retryable."""
-    rows = client.table("agent_research_jobs").select("*").eq("status", "READY").is_("github_issue_number", "null").order("priority", desc=True).limit(max(limit * 2, limit)).execute().data or []
-    rows = select_ready_agent_jobs(rows, limit=limit, contact_reserve=2)
+    base = client.table("agent_research_jobs").select("*").eq("status", "READY").is_("github_issue_number", "null")
+    # Fetch bounded slices per kind before applying fairness. A single global
+    # priority-ordered LIMIT can hide every contact job behind high-priority
+    # molecule jobs and make the reserve ineffective.
+    contact_rows = base.eq("job_kind", "CONTACT_RESEARCH").order("priority", desc=True).limit(limit).execute().data or []
+    legacy_contact_rows = base.is_("job_kind", "null").order("priority", desc=True).limit(limit).execute().data or []
+    molecule_rows = base.eq("job_kind", "MOLECULE_INTELLIGENCE").order("priority", desc=True).limit(limit).execute().data or []
+    rows = select_ready_agent_jobs(contact_rows + legacy_contact_rows + molecule_rows, limit=limit, contact_reserve=2)
     exported = []
     errors = []
     for job in rows:
