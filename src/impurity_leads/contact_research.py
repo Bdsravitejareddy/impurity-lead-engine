@@ -312,6 +312,8 @@ def _portfolio_snapshot(client: Any, settings: Any) -> dict[str, Any]:
         direct_work_contacts = {str(row.get("contact_id")) for row in work_rows if row.get("attribution") == "PERSON_DIRECT"}
         source_classes: dict[str, set[str]] = {}
         for source in source_rows:
+            if str(source.get("status") or "").upper() != "USED":
+                continue
             source_classes.setdefault(str(source.get("contact_id")), set()).add(str(source.get("source_type") or source.get("source_kind") or "OTHER"))
         for row in rows:
             row["source_classes"] = list(source_classes.get(str(row.get("id")), set()))

@@ -26,19 +26,39 @@ def _bounded(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _as_percent(value: Any, default: float | None = None) -> float | None:
+    """Normalize stored decimal confidence values to the 0–100 score scale."""
+    if value is None:
+        return default
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if 0 < abs(number) <= 1:
+        number *= 100
+    return max(0.0, min(100.0, number))
+
+
 def score_contact(contact: dict[str, Any], *, sources: Iterable[dict[str, Any]] = (), opportunities: Iterable[dict[str, Any]] = ()) -> dict[str, Any]:
     """Score prioritisation quality, never purchase probability."""
-    source_rows = list(sources) or [{"source_class": value} for value in (contact.get("source_classes") or [])]
+    source_rows = list(sources)
+    if source_rows:
+        source_rows = [row for row in source_rows if not row.get("status") or str(row.get("status")).upper() == "USED"]
+    else:
+        source_rows = [{"source_class": value} for value in (contact.get("source_classes") or [])]
     opportunity_rows = list(opportunities) or [{} for _ in range(int(contact.get("opportunity_count") or 0))]
-    identity = _bounded(contact.get("contact_confidence", contact.get("identity_confidence")))
-    if not identity:
+    identity_value = contact.get("contact_confidence", contact.get("identity_confidence"))
+    identity = _as_percent(identity_value)
+    if identity is None:
         identity = 80.0 if contact.get("profile_url") else 45.0
-    current_role = _bounded(contact.get("current_role_confidence"))
-    if not current_role:
+    current_role_value = _as_percent(contact.get("current_role_confidence"))
+    current_role = current_role_value
+    if current_role is None:
         current_role = 82.0 if contact.get("title") and contact.get("last_verified_at") else (62.0 if contact.get("title") else 20.0)
     reasons: dict[str, list[str]] = {}
-    technical = _bounded(contact.get("technical_relevance"))
-    if technical:
+    technical_value = _as_percent(contact.get("technical_relevance"))
+    technical = technical_value or 0.0
+    if technical_value is not None and technical_value > 0:
         reasons["technical_relevance"] = ["person-direct technical evidence"]
     if not technical:
         text = " ".join(str(contact.get(key) or "").casefold() for key in ("title", "department", "function"))
@@ -46,10 +66,12 @@ def score_contact(contact: dict[str, Any], *, sources: Iterable[dict[str, Any]] 
         reasons["technical_relevance"] = ["title/department keyword fallback"] if technical > 25 else ["no technical evidence"]
     classes = {str(row.get("source_class") or row.get("source_type") or "").upper() for row in source_rows}
     source_independence = min(100.0, len(classes) * 25.0) if classes else 0.0
-    recency = _bounded(contact.get("recency_score")) or (70.0 if contact.get("last_verified_at") else 20.0)
+    recency_value = _as_percent(contact.get("recency_score"))
+    recency = recency_value if recency_value is not None else (70.0 if contact.get("last_verified_at") else 20.0)
     status = str(contact.get("contactability") or contact.get("email_status") or contact.get("phone_status") or "UNKNOWN").upper()
     contactability = {"VERIFIED_PUBLIC": 100, "PATTERN_CONFIRMED": 85, "PROFESSIONAL": 70, "ROLE_ONLY": 45, "STALE": 10, "UNKNOWN": 20}.get(status, 20)
-    opportunity_fit = _bounded(contact.get("opportunity_fit")) or (80.0 if opportunity_rows else 25.0)
+    opportunity_fit_value = _as_percent(contact.get("opportunity_fit"))
+    opportunity_fit = opportunity_fit_value if opportunity_fit_value is not None else (80.0 if opportunity_rows else 25.0)
     dimensions = {
         "identity": identity,
         "current_role": current_role,

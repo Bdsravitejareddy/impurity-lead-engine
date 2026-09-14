@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import { emptyIntelligence, normalizeContactIntelligence } from './contactIntelligence'
-import { buildCanonicalContacts, groupEvidenceBySource } from './integrity'
+import { buildCanonicalContacts, groupEvidenceBySource, rankContactsForOpportunity, readCurrentRoleConfidence, summarizeWorkState } from './integrity'
 
 export async function loadSupabaseData() {
   if (!supabase) throw new Error('supabase_not_configured')
@@ -44,7 +44,7 @@ export async function loadSupabaseData() {
     const list = contactByCompany.get(c.company_id) ?? []
     const evidence = contactEvidenceById.get(c.id) ?? []
     const metadata = evidence.map((e: any) => e.metadata_json || {}).reduce((acc: any, item: any) => ({ ...acc, ...item }), {})
-    list.push({ id: c.id, company_id: c.company_id, display_name: c.display_name, name: c.display_name, title: c.title, function: c.department, profile_url: c.profile_url, email: c.primary_email, email_status: c.email_status, mailbox_verified: c.email_status === 'VERIFIED_PUBLIC', phone: c.primary_phone, phone_status: c.phone_status, role_fit_score: c.role_fit_score, confidence: Number(c.contact_confidence ?? 0), last_verified_at: c.last_verified_at, current_status: metadata.current_status || (evidence.some((e: any) => ['company_site','company_profile','professional_profile','conference','company_press','company_pdf','association','registry'].includes(e.source_type)) ? 'PROFESSIONAL_PROFILE' : 'UNKNOWN'), evidence_urls: evidence.map((e: any) => e.source_url).filter(Boolean), evidence, professional_themes: metadata.professional_themes || [], jtbd: metadata.jtbd || metadata.inferred_jtbd || [], why: metadata.why || metadata.observed_context, recommended_channel: metadata.recommended_channel, intelligence: normalizeContactIntelligence(c.id, intelTables) })
+    list.push({ id: c.id, company_id: c.company_id, display_name: c.display_name, name: c.display_name, title: c.title, function: c.department, profile_url: c.profile_url, email: c.primary_email, email_status: c.email_status, mailbox_verified: c.email_status === 'VERIFIED_PUBLIC', phone: c.primary_phone, phone_status: c.phone_status, role_fit_score: c.role_fit_score, confidence: Number(c.contact_confidence ?? 0), contact_confidence: c.contact_confidence, identity_confidence: c.contact_confidence, technical_relevance: c.technical_relevance, quality: c.quality_diagnostics?.score ?? null, quality_diagnostics: c.quality_diagnostics, current_role_confidence: readCurrentRoleConfidence(c), last_verified_at: c.last_verified_at, current_status: metadata.current_status || (evidence.some((e: any) => ['company_site','company_profile','professional_profile','conference','company_press','company_pdf','association','registry'].includes(e.source_type)) ? 'PROFESSIONAL_PROFILE' : 'UNKNOWN'), evidence_urls: evidence.map((e: any) => e.source_url).filter(Boolean), evidence, professional_themes: metadata.professional_themes || [], jtbd: metadata.jtbd || metadata.inferred_jtbd || [], why: metadata.why || metadata.observed_context, recommended_channel: metadata.recommended_channel, intelligence: normalizeContactIntelligence(c.id, intelTables) })
     contactByCompany.set(c.company_id, list)
   })
   const signalByPair = new Map<string, any[]>()
@@ -54,8 +54,8 @@ export async function loadSupabaseData() {
     const links = [...(linksByOpportunity.get(o.id) ?? [])].sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99))
     const linkedIds = new Set(links.map((link: any) => link.contact_id))
     const companyContacts = [...(contactByCompany.get(o.company_id) ?? [])]
-    const primaryContacts = companyContacts.filter((contact: any) => linkedIds.has(contact.id)).sort((a: any, b: any) => (b.role_fit_score ?? 0) - (a.role_fit_score ?? 0))
-    const otherCompanyContacts = companyContacts.filter((contact: any) => !linkedIds.has(contact.id)).sort((a: any, b: any) => (b.role_fit_score ?? 0) - (a.role_fit_score ?? 0))
+    const primaryContacts = rankContactsForOpportunity(companyContacts.filter((contact: any) => linkedIds.has(contact.id)))
+    const otherCompanyContacts = rankContactsForOpportunity(companyContacts.filter((contact: any) => !linkedIds.has(contact.id)))
     const intelligence = primaryContacts.reduce((acc: any, contact: any) => {
       const intel = contact.intelligence || {}
       ;(['observed', 'inferred', 'unknown'] as const).forEach(key => { acc[key].push(...(intel.claims || []).filter((claim: any) => key === 'observed' ? claim.provenance === 'OBSERVED' : key === 'inferred' ? claim.provenance === 'INFERRED' : claim.provenance === 'UNKNOWN').map((claim: any) => claim.claim_text || claim.statement || claim.basis).filter(Boolean)) })
@@ -70,11 +70,11 @@ export async function loadSupabaseData() {
   const latestRun = runs.data?.[0]
   const canonicalContacts = buildCanonicalContacts(Array.from(contactByCompany.values()).flat(), opportunityContacts.data ?? [], sources.data ?? [], companyNames)
   const latestTargeted = targetedJobs.data?.[0]
-  const latestAgent = agentJobs.data?.[0]
-  const latestSubmission = agentSubmissions.data?.[0]
+  const workExport = summarizeWorkState(agentJobs.data ?? [], agentSubmissions.data ?? [])
+  const workIngestion = summarizeWorkState(agentJobs.data ?? [], agentSubmissions.data ?? [])
   const moleculeIntelligence = Object.fromEntries((moleculeSections.data || []).reduce((map: Map<string, any[]>, section: any) => { const rows = map.get(section.molecule_id) || []; rows.push(section); map.set(section.molecule_id, rows); return map }, new Map<string, any[]>()))
   const moleculeEntityIds = new Map<string, string>()
   ;(researchEntities.data || []).filter((entity: any) => entity.entity_type === 'MOLECULE').forEach((entity: any) => { const moleculeId = entity.metadata_json?.molecule_id; if (moleculeId) moleculeEntityIds.set(entity.id, moleculeId) })
   const moleculeClaims = Object.fromEntries((researchClaims.data || []).reduce((map: Map<string, any[]>, claim: any) => { const moleculeId = moleculeEntityIds.get(claim.entity_id); if (!moleculeId) return map; const rows = map.get(moleculeId) || []; rows.push(claim); map.set(moleculeId, rows); return map }, new Map<string, any[]>()))
-  return { leads, canonicalContacts, moleculeIntelligence, moleculeClaims, researchClaims: researchClaims.data || [], candidates: [], pipeline: { crawler: latestRun || null, contactResearch: researchRuns.data?.[0] || null, targetedResearch: latestTargeted || null, workExport: latestAgent || null, workIngestion: latestSubmission || null }, metrics: { qualified_ge_50: leads.length, hot: leads.filter((x: any) => x.opportunity.priority === 'HOT').length, high: leads.filter((x: any) => x.opportunity.priority === 'HIGH').length, review: leads.filter((x: any) => x.opportunity.priority === 'REVIEW').length, crawler: latestRun, canonical_contacts: canonicalContacts.length } }
+  return { leads, canonicalContacts, moleculeIntelligence, moleculeClaims, researchClaims: researchClaims.data || [], candidates: [], pipeline: { crawler: latestRun || null, contactResearch: researchRuns.data?.[0] || null, targetedResearch: latestTargeted || null, workExport, workIngestion }, metrics: { qualified_ge_50: leads.length, hot: leads.filter((x: any) => x.opportunity.priority === 'HOT').length, high: leads.filter((x: any) => x.opportunity.priority === 'HIGH').length, review: leads.filter((x: any) => x.opportunity.priority === 'REVIEW').length, crawler: latestRun, canonical_contacts: canonicalContacts.length, opportunity_contact_links: opportunityContacts.data?.length ?? 0 } }
 }

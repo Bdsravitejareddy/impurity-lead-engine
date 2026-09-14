@@ -7,18 +7,84 @@ export function buildCanonicalContacts(
   const opps = new Map<string, Set<string>>()
   const sourceKeys = new Map<string, Set<string>>()
   opportunityLinks.forEach(link => { if (!link.contact_id) return; const set = opps.get(link.contact_id) || new Set<string>(); if (link.opportunity_id) set.add(link.opportunity_id); opps.set(link.contact_id, set) })
-  sources.forEach(source => { if (!source.contact_id) return; const set = sourceKeys.get(source.contact_id) || new Set<string>(); const key = source.url || source.source_url || source.id; if (key) set.add(key); sourceKeys.set(source.contact_id, set) })
+  sources.forEach(source => {
+    if (!source.contact_id) return
+    const status = String(source.status || '').toUpperCase()
+    if (status && status !== 'USED') return
+    const set = sourceKeys.get(source.contact_id) || new Set<string>()
+    const key = source.url || source.source_url || source.id
+    if (key) set.add(key)
+    sourceKeys.set(source.contact_id, set)
+  })
   return contacts.map(contact => ({
     ...contact,
     id: contact.id,
     company: companyNames.get(contact.company_id) || 'Unknown company',
     linked_opportunities: opps.get(contact.id)?.size || 0,
     sources: sourceKeys.get(contact.id)?.size || 0,
-    quality: Number(contact.contact_quality_score ?? contact.quality_diagnostics?.score ?? contact.contact_confidence ?? 0),
-    current_role_confidence: contact.current_role_confidence != null ? Number(contact.current_role_confidence) : contact.quality_diagnostics?.dimensions?.current_role != null ? Number(contact.quality_diagnostics.dimensions.current_role) / 100 : Number(contact.contact_confidence ?? 0),
+    quality: contact.contact_quality_score ?? contact.quality_diagnostics?.score ?? null,
+    current_role_confidence: readCurrentRoleConfidence(contact),
     contactability: contact.email_status || contact.phone_status || (contact.profile_url ? 'PROFESSIONAL' : 'UNKNOWN'),
     last_verified: contact.last_verified_at || null,
   }))
+}
+
+export function readCurrentRoleConfidence(contact: any) {
+  const diagnostic = String(contact.quality_diagnostics?.diagnostics?.current_role || '').toLowerCase()
+  if (/missing|not established|stale/.test(diagnostic)) return null
+  if (contact.current_role_confidence != null) return Number(contact.current_role_confidence)
+  return contact.quality_diagnostics?.dimensions?.current_role != null ? Number(contact.quality_diagnostics.dimensions.current_role) / 100 : null
+}
+
+const toPercent = (value: any) => {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return 0
+  return number > 0 && number <= 1 ? number * 100 : number
+}
+
+const contactabilityRank: Record<string, number> = { VERIFIED_PUBLIC: 5, PATTERN_CONFIRMED: 4, PROFESSIONAL: 3, ROLE_ONLY: 2, STALE: 1, UNKNOWN: 0 }
+
+export function formatQuality(value: any) {
+  if (value === null || value === undefined || value === '') return 'Not scored'
+  const number = Number(value)
+  return Number.isFinite(number) ? String(Math.round(number)) : 'Not scored'
+}
+
+export function formatRoleConfidence(value: any) {
+  if (value === null || value === undefined || value === '') return 'Not established'
+  const number = Number(value)
+  return Number.isFinite(number) ? `${Math.round(number > 0 && number <= 1 ? number * 100 : number)}%` : 'Not established'
+}
+
+export function isQualifiedContact(contact: any) {
+  return Number(contact.quality) >= 70 && toPercent(contact.identity_confidence ?? contact.contact_confidence) >= 70 && toPercent(contact.technical_relevance) >= 55
+}
+
+export function rankContactsForOpportunity(contacts: any[]) {
+  return [...contacts].sort((a, b) => {
+    const qualified = Number(isQualifiedContact(b)) - Number(isQualifiedContact(a))
+    if (qualified) return qualified
+    const score = Number(b.quality ?? -1) - Number(a.quality ?? -1)
+    if (score) return score
+    const identity = toPercent(b.identity_confidence ?? b.contact_confidence) - toPercent(a.identity_confidence ?? a.contact_confidence)
+    if (identity) return identity
+    const technical = toPercent(b.technical_relevance) - toPercent(a.technical_relevance)
+    if (technical) return technical
+    const reach = (contactabilityRank[String(b.contactability || 'UNKNOWN').toUpperCase()] ?? 0) - (contactabilityRank[String(a.contactability || 'UNKNOWN').toUpperCase()] ?? 0)
+    if (reach) return reach
+    const role = toPercent(b.current_role_confidence) - toPercent(a.current_role_confidence)
+    if (role) return role
+    return String(b.last_verified || '').localeCompare(String(a.last_verified || ''))
+  })
+}
+
+export function summarizeWorkState(jobs: any[] = [], submissions: any[] = []) {
+  const counts = jobs.reduce((acc: Record<string, number>, job: any) => { const status = String(job.status || 'UNKNOWN').toUpperCase(); acc[status] = (acc[status] || 0) + 1; return acc }, {})
+  const applied = counts.APPLIED || 0
+  const pending = jobs.filter(job => !['APPLIED', 'REJECTED', 'FAILED', 'PARTIAL'].includes(String(job.status || '').toUpperCase())).length
+  const status = applied > 0 && pending === 0 ? 'APPLIED' : applied > 0 ? 'PARTIAL' : (jobs[0]?.status || 'WAITING')
+  const validation = submissions.reduce((acc: Record<string, number>, row: any) => { const value = String(row.validation_status || 'UNKNOWN').toUpperCase(); acc[value] = (acc[value] || 0) + 1; return acc }, {})
+  return { status, counts, applied, pending, total: jobs.length, validation, jobs, submissions }
 }
 
 export function groupEvidenceBySource(items: any[]) {

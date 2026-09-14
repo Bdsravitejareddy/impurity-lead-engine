@@ -7,6 +7,24 @@ def test_dimension_score_is_backend_authoritative_and_bounded():
     assert result["dimensions"]["technical_relevance"] >= 55
 
 
+def test_decimal_contact_confidence_is_normalized_to_percent():
+    result = score_contact({"contact_confidence": 0.94, "technical_relevance": 94})
+    assert result["identity_confidence"] == 94.0
+
+
+def test_explicit_zero_current_role_is_not_replaced_by_heuristic():
+    result = score_contact({"contact_confidence": 0.8, "current_role_confidence": 0})
+    assert result["dimensions"]["current_role"] == 0.0
+
+
+def test_rejected_sources_do_not_raise_source_independence():
+    result = score_contact({"contact_confidence": 0.8}, sources=[
+        {"source_type": "PUBLICATION", "status": "USED"},
+        {"source_type": "Official company", "status": "REJECTED"},
+    ])
+    assert result["dimensions"]["source_independence"] == 25.0
+
+
 def test_person_direct_evidence_explains_technical_score_over_title_fallback():
     direct = score_contact({"technical_relevance": 85, "title": "Researcher", "contact_confidence": 60})
     fallback = score_contact({"title": "Analytical Development Director", "contact_confidence": 60})

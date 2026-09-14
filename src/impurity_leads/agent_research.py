@@ -14,6 +14,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from impurity_leads.contacts.normalize import normalize_person_name, person_name_compatibility
 from impurity_leads.molecule_intelligence import apply_molecule_sections, normalize_claim_type
+from impurity_leads.contact_quality import score_contact
 
 
 OUTPUT_SCHEMA = {
@@ -433,4 +434,16 @@ def apply_validated_agent_research(client: Any, *, job: dict[str, Any], validate
             client.table("opportunity_contacts").upsert(opportunity_contact_link_payload(opportunity_id=opportunity_id, contact_id=contact_id, identity_confidence=person.get("identity_confidence"), source_ids=ids, rationale=link_reason), on_conflict="opportunity_id,contact_id").execute()
         except Exception as exc:
             metrics.setdefault("link_errors", []).append(str(exc)[:240])
+        # Persist the deterministic score read model after all evidence writes.
+        # The canonical contacts table stores confidence as a decimal while
+        # score dimensions use 0–100; score_contact normalizes that boundary.
+        try:
+            scored_sources = client.table("contact_sources").select("source_type,evidence_strength,status").eq("contact_id", contact_id).eq("status", "USED").execute().data or []
+            scored = score_contact(contact, sources=scored_sources, opportunities=[{"id": opportunity_id}])
+            diagnostics = {"score": scored["score"], "dimensions": scored["dimensions"], "diagnostics": scored["diagnostics"]}
+            client.table("contacts").update({"quality_diagnostics": diagnostics}).eq("id", contact_id).execute()
+        except Exception:
+            # A diagnostics write must never discard an already persisted
+            # source, graph relationship, claim, or opportunity link.
+            pass
     return metrics
