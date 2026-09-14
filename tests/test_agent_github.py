@@ -7,6 +7,7 @@ from impurity_leads.agent_github import (
     extract_job_payload,
     extract_marked_json,
     render_issue_body,
+    select_ready_agent_jobs,
 )
 
 
@@ -45,3 +46,16 @@ def test_unmarked_or_malformed_comment_is_ignored():
     assert value is None and error == "markers_missing"
     value, error = extract_marked_json(f"{WORK_RESULT_START}{{bad}}{WORK_RESULT_END}")
     assert value is None and error == "invalid_json"
+
+
+def test_ready_job_selection_reserves_capacity_for_contact_research():
+    rows = [
+        {"id": "m1", "job_kind": "MOLECULE_INTELLIGENCE", "priority": 100},
+        {"id": "m2", "job_kind": "MOLECULE_INTELLIGENCE", "priority": 99},
+        {"id": "m3", "job_kind": "MOLECULE_INTELLIGENCE", "priority": 98},
+        {"id": "c1", "job_kind": "CONTACT_RESEARCH", "priority": 70},
+        {"id": "c2", "job_kind": "CONTACT_RESEARCH", "priority": 60},
+    ]
+    selected = select_ready_agent_jobs(rows, limit=5, contact_reserve=2)
+    assert [row["id"] for row in selected[:2]] == ["c1", "c2"]
+    assert {row["job_kind"] for row in selected} == {"CONTACT_RESEARCH", "MOLECULE_INTELLIGENCE"}

@@ -97,9 +97,22 @@ def _run_gh(args: list[str], *, repo: str) -> str:
     return result.stdout.strip()
 
 
+def select_ready_agent_jobs(rows: list[dict[str, Any]], *, limit: int = 5, contact_reserve: int = 2) -> list[dict[str, Any]]:
+    """Select READY jobs fairly so molecule work cannot starve contacts."""
+    if limit <= 0:
+        return []
+    ordered = sorted(rows, key=lambda row: int(row.get("priority") or 0), reverse=True)
+    contacts = [row for row in ordered if str(row.get("job_kind") or "CONTACT_RESEARCH") == "CONTACT_RESEARCH"]
+    reserved = contacts[:min(max(contact_reserve, 0), limit)]
+    selected_ids = {str(row.get("id")) for row in reserved}
+    remainder = [row for row in ordered if str(row.get("id")) not in selected_ids]
+    return (reserved + remainder)[:limit]
+
+
 def export_ready_agent_jobs(client: Any, *, repo: str, limit: int = 5) -> dict[str, Any]:
     """Export READY jobs once. GitHub failures remain observable and retryable."""
-    rows = client.table("agent_research_jobs").select("*").eq("status", "READY").is_("github_issue_number", "null").order("priority", desc=True).limit(limit).execute().data or []
+    rows = client.table("agent_research_jobs").select("*").eq("status", "READY").is_("github_issue_number", "null").order("priority", desc=True).limit(max(limit * 2, limit)).execute().data or []
+    rows = select_ready_agent_jobs(rows, limit=limit, contact_reserve=2)
     exported = []
     errors = []
     for job in rows:

@@ -183,11 +183,39 @@ def run_pending_targeted_jobs(settings: Any, *, limit: int = 10, provider: Disco
     from impurity_leads.contact_research import _get_json
     client = create_client(settings.supabase_url, settings.supabase_secret_key)
     provider = provider or EuropePmcProvider(_get_json)
+    contact_jobs_queued = 0
+    # Re-evaluate high-priority opportunities before consuming the queue. The
+    # crawler may refresh contacts without creating a targeted job; contact
+    # research must remain independent of molecule intelligence.
+    try:
+        opportunities = client.table("opportunities").select("*").in_("priority", ["HOT", "HIGH"]).order("score", desc=True).limit(50).execute().data or []
+        contacts = client.table("contacts").select("*").execute().data or []
+        for opportunity in opportunities:
+            if contact_jobs_queued >= 5:
+                break
+            if opportunity.get("company_id"):
+                company_rows = client.table("companies").select("legal_name,normalized_name").eq("id", opportunity["company_id"]).limit(1).execute().data or []
+                if company_rows:
+                    opportunity["company_name"] = company_rows[0].get("legal_name") or company_rows[0].get("normalized_name")
+            if opportunity.get("molecule_id"):
+                molecule_rows = client.table("molecules").select("canonical_name").eq("id", opportunity["molecule_id"]).limit(1).execute().data or []
+                if molecule_rows:
+                    opportunity["molecule_name"] = molecule_rows[0].get("canonical_name")
+            # Coverage is opportunity-specific. Never let an unrelated
+            # company contact suppress research for this opportunity.
+            links = client.table("opportunity_contacts").select("contact_id").eq("opportunity_id", opportunity.get("id")).execute().data or []
+            linked_ids = {str(row.get("contact_id")) for row in links if row.get("contact_id")}
+            opportunity_contacts = [row for row in contacts if str(row.get("id")) in linked_ids]
+            queued = queue_for_opportunity(client, opportunity, opportunity_contacts)
+            contact_jobs_queued += int(queued.get("queued") or 0)
+    except Exception:
+        # Recovery must not prevent already-queued jobs from being processed.
+        pass
     try:
         jobs = client.table("targeted_research_jobs").select("*").eq("status", "QUEUED").order("priority", desc=True).limit(limit).execute().data or []
     except Exception:
         return {"status": "SKIPPED", "reason": "targeted_jobs_table_unavailable", "processed": 0}
-    result = {"status": "COMPLETED", "processed": 0, "sources": 0, "claims": 0, "relationships": 0, "stop_reasons": {}, "molecule_jobs_queued": 0}
+    result = {"status": "COMPLETED", "processed": 0, "sources": 0, "claims": 0, "relationships": 0, "stop_reasons": {}, "contact_jobs_queued": contact_jobs_queued, "molecule_jobs_queued": 0}
     for job in jobs:
         opportunity_rows = client.table("opportunities").select("*").eq("id", job["opportunity_id"]).limit(1).execute().data or []
         if not opportunity_rows:
