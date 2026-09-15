@@ -1,11 +1,12 @@
 import { supabase } from './supabase'
 import { emptyIntelligence, normalizeContactIntelligence } from './contactIntelligence'
-import { buildCanonicalContacts, groupEvidenceBySource, rankContactsForOpportunity, readCurrentRoleConfidence, summarizeWorkState } from './integrity'
+import { buildCanonicalContacts, groupEvidenceBySource, rankContactsForOpportunity, readCurrentRoleConfidence, summarizeOpportunityMetrics, summarizeWorkState } from './integrity'
 
 export async function loadSupabaseData() {
   if (!supabase) throw new Error('supabase_not_configured')
-  const [opportunities, signals, contacts, companies, molecules, opportunityContacts, contactEvidence, runs, sources, positions, education, works, problems, themes, jtbd, claims, notes, history, conflicts, researchRuns, targetedJobs, agentJobs, agentSubmissions, moleculeSections, researchClaims, researchEntities] = await Promise.all([
+  const [opportunities, allOpportunities, signals, contacts, companies, molecules, opportunityContacts, contactEvidence, runs, sources, positions, education, works, problems, themes, jtbd, claims, notes, history, conflicts, researchRuns, targetedJobs, agentJobs, agentSubmissions, moleculeSections, researchClaims, researchEntities] = await Promise.all([
     supabase.from('opportunities').select('*, companies(*), molecules(*)').gte('score', 50).neq('status', 'dismissed').order('score', { ascending: false }),
+    supabase.from('opportunities').select('id,status,score,priority'),
     supabase.from('signals').select('id,company_id,molecule_id,source_type,signal_type,source_url,source_record_id,evidence_text,event_date,confidence,base_weight,fingerprint').order('event_date', { ascending: false }),
     supabase.from('contacts').select('id,company_id,display_name,title,department,profile_url,primary_email,email_status,primary_phone,phone_status,role_fit_score,contact_confidence,technical_relevance,quality_diagnostics,last_verified_at'),
     supabase.from('companies').select('id,legal_name,normalized_name'),
@@ -32,7 +33,7 @@ export async function loadSupabaseData() {
     supabase.from('research_claims').select('id,entity_id,claim_type,claim_text,source_url,source_class,attribution,provenance,confidence,created_at'),
     supabase.from('research_entities').select('id,entity_type,canonical_name,metadata_json'),
   ])
-  for (const result of [opportunities, signals, contacts, companies, molecules, opportunityContacts, contactEvidence, runs, sources, positions, education, works, problems, themes, jtbd, claims, notes, history, conflicts, researchRuns, targetedJobs, agentJobs, agentSubmissions, moleculeSections, researchClaims, researchEntities]) if (result.error) throw result.error
+  for (const result of [opportunities, allOpportunities, signals, contacts, companies, molecules, opportunityContacts, contactEvidence, runs, sources, positions, education, works, problems, themes, jtbd, claims, notes, history, conflicts, researchRuns, targetedJobs, agentJobs, agentSubmissions, moleculeSections, researchClaims, researchEntities]) if (result.error) throw result.error
   const intelTables = {sources: sources.data ?? [], positions: positions.data ?? [], education: education.data ?? [], works: works.data ?? [], problems: problems.data ?? [], themes: themes.data ?? [], jtbd: jtbd.data ?? [], claims: claims.data ?? [], notes: notes.data ?? [], history: history.data ?? [], conflicts: conflicts.data ?? [], researchRuns: researchRuns.data ?? []}
   const contactEvidenceById = new Map<string, any[]>()
   ;(contactEvidence.data ?? []).forEach((e: any) => { const items = contactEvidenceById.get(e.contact_id) ?? []; if (!items.some((x: any) => x.source_url === e.source_url && x.evidence_type === e.evidence_type)) items.push(e); contactEvidenceById.set(e.contact_id, items) })
@@ -77,5 +78,6 @@ export async function loadSupabaseData() {
   const moleculeEntityIds = new Map<string, string>()
   ;(researchEntities.data || []).filter((entity: any) => entity.entity_type === 'MOLECULE').forEach((entity: any) => { const moleculeId = entity.metadata_json?.molecule_id; if (moleculeId) moleculeEntityIds.set(entity.id, moleculeId) })
   const moleculeClaims = Object.fromEntries((researchClaims.data || []).reduce((map: Map<string, any[]>, claim: any) => { const moleculeId = moleculeEntityIds.get(claim.entity_id); if (!moleculeId) return map; const rows = map.get(moleculeId) || []; rows.push(claim); map.set(moleculeId, rows); return map }, new Map<string, any[]>()))
-  return { leads, canonicalContacts, moleculeIntelligence, moleculeClaims, researchClaims: researchClaims.data || [], candidates: [], pipeline: { crawler: latestRun || null, contactResearch: researchRuns.data?.[0] || null, targetedResearch: latestTargeted || null, workExport, workIngestion }, metrics: { qualified_ge_50: leads.length, hot: leads.filter((x: any) => x.opportunity.priority === 'HOT').length, high: leads.filter((x: any) => x.opportunity.priority === 'HIGH').length, review: leads.filter((x: any) => x.opportunity.priority === 'REVIEW').length, crawler: latestRun, companies_count: companies.data?.length ?? 0, molecules_count: molecules.data?.length ?? 0, signals_count: signals.data?.length ?? 0, canonical_contacts: canonicalContacts.length, opportunity_contact_links: opportunityContacts.data?.length ?? 0 } }
+  const opportunityMetrics = summarizeOpportunityMetrics(allOpportunities.data ?? [])
+  return { leads, canonicalContacts, moleculeIntelligence, moleculeClaims, researchClaims: researchClaims.data || [], candidates: [], pipeline: { crawler: latestRun || null, contactResearch: researchRuns.data?.[0] || null, targetedResearch: latestTargeted || null, workExport, workIngestion }, metrics: { opportunities_total: opportunityMetrics.total, qualified_ge_50: opportunityMetrics.qualified, hot: opportunityMetrics.hot, high: opportunityMetrics.high, review: opportunityMetrics.review, crawler: latestRun, companies_count: companies.data?.length ?? 0, molecules_count: molecules.data?.length ?? 0, signals_count: signals.data?.length ?? 0, canonical_contacts: canonicalContacts.length, opportunity_contact_links: opportunityContacts.data?.length ?? 0 } }
 }

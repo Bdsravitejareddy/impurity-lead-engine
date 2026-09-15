@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildCanonicalContacts, formatQuality, formatRoleConfidence, groupEvidenceBySource, rankContactsForOpportunity, readCurrentRoleConfidence, summarizeWorkState } from './integrity'
+import { buildCanonicalContacts, formatQuality, formatRoleConfidence, groupEvidenceBySource, rankContactsForOpportunity, readCurrentRoleConfidence, summarizeOpportunityMetrics, summarizeWorkState } from './integrity'
 
 describe('canonical contact read model', () => {
   it('returns one row per contact id and counts explicit opportunity links', () => {
@@ -22,6 +22,20 @@ describe('canonical contact read model', () => {
     const [row] = buildCanonicalContacts([{ id: 'c1', display_name: 'A', company_id: 'co1', quality_diagnostics: { score: 61.1, dimensions: { current_role: 20 } } }], [], [], new Map([['co1', 'Acme']]))
     expect(row.quality).toBe(61.1)
     expect(row.current_role_confidence).toBe(0.2)
+  })
+
+  it('collapses repeated joined rows by canonical id while aggregating children', () => {
+    const rows = buildCanonicalContacts([
+      { id: 'c1', display_name: 'A', company_id: 'co1', evidence: [{ id: 'w1' }], evidence_urls: ['https://a.test'], intelligence: { works: [{ id: 'work1' }] } },
+      { id: 'c1', display_name: 'A', company_id: 'co1', evidence: [{ id: 'w2' }], evidence_urls: ['https://b.test'], intelligence: { works: [{ id: 'work2' }] } },
+    ], [
+      { contact_id: 'c1', opportunity_id: 'o1' }, { contact_id: 'c1', opportunity_id: 'o2' }, { contact_id: 'c1', opportunity_id: 'o3' },
+    ], [
+      { contact_id: 'c1', url: 'https://a.test', status: 'USED' }, { contact_id: 'c1', url: 'https://b.test', status: 'USED' },
+    ], new Map([['co1', 'Acme']]))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ id: 'c1', linked_opportunities: 3, sources: 2 })
+    expect(rows[0].evidence_urls).toHaveLength(2)
   })
 
   it('does not count rejected source rows or use identity as a quality fallback', () => {
@@ -55,6 +69,17 @@ describe('canonical contact read model', () => {
 
   it('shows role confidence as unestablished when diagnostics say evidence is missing', () => {
     expect(readCurrentRoleConfidence({ quality_diagnostics: { dimensions: { current_role: 62 }, diagnostics: { current_role: 'Current role evidence is missing' } } })).toBeNull()
+  })
+})
+
+describe('opportunity metric semantics', () => {
+  it('keeps total opportunities distinct from qualified opportunities', () => {
+    expect(summarizeOpportunityMetrics([
+      { id: 'o1', score: 82, priority: 'HOT', status: 'active' },
+      { id: 'o2', score: 51, priority: 'REVIEW', status: 'active' },
+      { id: 'o3', score: 42, priority: 'REVIEW', status: 'active' },
+      { id: 'o4', score: 90, priority: 'HOT', status: 'dismissed' },
+    ])).toEqual({ total: 4, qualified: 2, hot: 1, high: 0, review: 1 })
   })
 })
 

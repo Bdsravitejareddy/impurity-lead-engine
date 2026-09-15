@@ -16,7 +16,30 @@ export function buildCanonicalContacts(
     if (key) set.add(key)
     sourceKeys.set(source.contact_id, set)
   })
-  return contacts.map(contact => ({
+  // The adapter may receive repeated contact objects when a backend query is
+  // joined to child rows. Canonical identity is contacts.id: collapse only
+  // those repeated IDs while retaining every child relationship/evidence item.
+  const byId = new Map<string, any>()
+  contacts.forEach((contact, index) => {
+    const key = contact.id ? String(contact.id) : `__missing_id_${index}`
+    const existing = byId.get(key)
+    if (!existing) {
+      byId.set(key, { ...contact })
+      return
+    }
+    const merged = { ...existing }
+    for (const field of ['evidence_urls', 'evidence', 'professional_themes', 'career', 'technical_evidence']) {
+      if (Array.isArray(existing[field]) || Array.isArray(contact[field])) {
+        const values = [...(existing[field] || []), ...(contact[field] || [])]
+        merged[field] = values.filter((value: any, valueIndex: number, all: any[]) => all.findIndex(candidate => JSON.stringify(candidate) === JSON.stringify(value)) === valueIndex)
+      }
+    }
+    // Keep the first non-null canonical scalar; later joined rows should not
+    // overwrite identity fields with partial/null values.
+    for (const [field, value] of Object.entries(contact)) if ((merged[field] == null || merged[field] === '') && value != null && value !== '') merged[field] = value
+    byId.set(key, merged)
+  })
+  return Array.from(byId.values()).map(contact => ({
     ...contact,
     id: contact.id,
     company: companyNames.get(contact.company_id) || 'Unknown company',
@@ -97,4 +120,17 @@ export function groupEvidenceBySource(items: any[]) {
     grouped.set(key, { ...(existing || item), signal_types: signals, claims, source_key: key })
   })
   return Array.from(grouped.values())
+}
+
+/** Metrics for the complete opportunity collection, kept separate from the
+ * qualified-lead read model so labels cannot conflate the two counts. */
+export function summarizeOpportunityMetrics(opportunities: any[]) {
+  const qualified = opportunities.filter(opportunity => String(opportunity.status || '').toLowerCase() !== 'dismissed' && Number(opportunity.score || 0) >= 50)
+  return {
+    total: opportunities.length,
+    qualified: qualified.length,
+    hot: qualified.filter(opportunity => opportunity.priority === 'HOT').length,
+    high: qualified.filter(opportunity => opportunity.priority === 'HIGH').length,
+    review: qualified.filter(opportunity => opportunity.priority === 'REVIEW').length,
+  }
 }
