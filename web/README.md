@@ -5,10 +5,10 @@
 ```bash
 cd web
 npm install
-npm run dev
+VITE_DATA_MODE=local npm run dev
 ```
 
-The demo loads sanitized local data from `public/data.json`. For production, set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` and replace the adapter with the authenticated Supabase read adapter. Never expose a service-role key.
+The explicit `VITE_DATA_MODE=local` flag loads sanitized data from `public/data.json` for demo/review. Production has no local fallback: set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` at build time and authenticate through Supabase. Never expose a service-role key.
 
 ## Cloudflare Pages
 
@@ -16,4 +16,5 @@ The demo loads sanitized local data from `public/data.json`. For production, set
 - Root directory: `web`
 - Output directory: `dist`
 - Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` as encrypted environment variables.
+- Do not set `VITE_DATA_MODE=local` in the production environment.
 - Keep Supabase RLS enabled and use authenticated, publishable-key reads only.
