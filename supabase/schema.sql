@@ -33,6 +33,12 @@ create table if not exists public.company_molecules (
   relationship_type text,
   development_phase text,
   regulatory_status text,
+  candidate_score integer check (candidate_score between 0 and 100),
+  candidate_status text check (candidate_status in ('UNQUALIFIED','QUALIFIED')),
+  candidate_rationale text,
+  candidate_signal_fingerprints text[] not null default '{}',
+  candidate_last_signal_at timestamptz,
+  candidate_last_evaluated_at timestamptz,
   first_seen_at timestamptz not null default now(),
   last_seen_at timestamptz not null default now(),
   unique(company_id, molecule_id)
@@ -436,6 +442,7 @@ begin
     case tab
       when 'companies' then conflict_key:='id'; allowed:=array['id','normalized_name','legal_name','last_seen_at'];
       when 'molecules' then conflict_key:='id'; allowed:=array['id','canonical_name','last_seen_at'];
+      when 'company_molecules' then conflict_key:='company_id,molecule_id'; allowed:=array['id','company_id','molecule_id','relationship_type','development_phase','regulatory_status','candidate_score','candidate_status','candidate_rationale','candidate_signal_fingerprints','candidate_last_signal_at','candidate_last_evaluated_at'];
       when 'signals' then conflict_key:='fingerprint'; allowed:=array['id','company_id','molecule_id','source_type','signal_type','source_url','source_record_id','evidence_text','event_date','discovered_at','freshness_days','base_weight','confidence','fingerprint','metadata_json'];
       when 'opportunities' then conflict_key:='company_id,molecule_id'; allowed:=array['id','company_id','molecule_id','score','priority','likely_need_type','rationale','decision_maker_role','last_qualified_at','last_signal_at'];
       when 'opportunity_signals' then conflict_key:='opportunity_id,signal_id'; allowed:=array['opportunity_id','signal_id','contribution_score'];

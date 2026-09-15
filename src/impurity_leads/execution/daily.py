@@ -18,7 +18,7 @@ from impurity_leads.execution.tasks import STAGES, VERSION, behavior_version, fi
 from impurity_leads.export import export_csv, export_xlsx
 from impurity_leads.models import SourceRecord, Signal, Opportunity
 from impurity_leads.normalize import normalize_company_name
-from impurity_leads.pipeline import process_records
+from impurity_leads.pipeline import process_records_with_candidates
 from impurity_leads.seeds import load_company_seeds
 from impurity_leads.storage.memory import MemoryLeadStore
 from impurity_leads.storage.supabase_store import SupabaseLeadStore
@@ -38,9 +38,10 @@ class RowCollector:
         return Table()
 
 
-def publication_rows(signals, opportunities, contact_map):
+def publication_rows(signals, opportunities, contact_map, candidates=()):
     collector=RowCollector();store=SupabaseLeadStore(collector)
     for item in signals:store.save_signal(item)
+    for candidate in candidates:store.save_candidate(candidate)
     for item in opportunities:
         store.save_opportunity(item)
         for contact in contact_map.get((item.company_name,item.molecule_name),[]):
@@ -115,16 +116,27 @@ def execute_run(store,settings,seeds,output_dir,*,workers=6,reporter=None,client
         records=[]
         records.extend(collected_records(store.tasks()))
         memory=MemoryLeadStore()
-        opportunities=process_records(records,memory)
+        opportunities, candidates = process_records_with_candidates(records,memory)
+        candidate_payload = [
+            {**candidate, 'last_signal_at': candidate['last_signal_at'].isoformat() if candidate.get('last_signal_at') else None}
+            for candidate in candidates
+        ]
         return {'signals':[s.model_dump(mode='json') for s in memory.signals],
-                'opportunities':[o.model_dump(mode='json') for o in opportunities], 'records_seen':len(records)}
+                'opportunities':[o.model_dump(mode='json') for o in opportunities],
+                'candidates': candidate_payload, 'records_seen':len(records)}
     if not stage(STAGES[2],process):return 130
     processing=outputs(STAGES[2])[0]
     if processing['status']!='completed':
         store.finish('failed',STAGES[2],metrics);return 1
     signals=[Signal.model_validate(s) for s in processing['result_json']['signals']]
     opportunities=[Opportunity.model_validate(o) for o in processing['result_json']['opportunities']]
-    metrics.update(signals=len(signals),qualified=len(opportunities),records=processing['result_json']['records_seen'])
+    candidates=processing['result_json'].get('candidates', [])
+    unqualified_count=sum(1 for candidate in candidates if not candidate.get('priority'))
+    qualified_count=sum(1 for candidate in candidates if candidate.get('priority'))
+    metrics.update(signals=len(signals),candidates=len(candidates),qualified=qualified_count,records=processing['result_json']['records_seen'],
+        signals_discovered=len(signals), candidates_scored=len(candidates), new_candidate_pairs=unqualified_count,
+        existing_pairs_enriched=0, new_opportunities_persisted=qualified_count,
+        newly_qualified=qualified_count, promoted=0, dismissed=0, unresolved=0)
     from impurity_leads.cli import select_contact_enrichment_targets
     seed_map={normalize_company_name(s.company_name):s for s in seeds}
     selected=defaultdict(list)
@@ -142,7 +154,7 @@ def execute_run(store,settings,seeds,output_dir,*,workers=6,reporter=None,client
             contact_map[(item['company_name'],item['molecule_name'])]=[RankedContact.model_validate(c) for c in item['ranked']]
     metrics['contacts']=len({(name,c.contact.normalized_name) for (name,_),contacts in contact_map.items() for c in contacts})
     def persist(ctx):
-        rows=publication_rows(signals,opportunities,contact_map)
+        rows=publication_rows(signals,opportunities,contact_map,candidates)
         for index in range(ctx.checkpoint.get('index',0),len(rows),50):
             ctx.check()
             cp={'index':min(index+50,len(rows))}

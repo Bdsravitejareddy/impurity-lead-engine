@@ -63,6 +63,17 @@ def test_store_links_opportunity_to_signal_fingerprint():
     assert client.tables["opportunity_signals"].rows
 
 
+def test_store_retains_unqualified_company_molecule_candidate():
+    client = FakeClient()
+    store = SupabaseLeadStore(client)
+    store.save_candidate({"company_name": "Example Pharma", "molecule_name": "Drug X", "score": 36,
+                          "rationale": "regulatory application", "signal_fingerprints": ["sig-1"]})
+    row = client.tables["company_molecules"].rows[0][0]
+    assert row["candidate_status"] == "UNQUALIFIED"
+    assert row["candidate_score"] == 36
+    assert row["candidate_signal_fingerprints"] == ["sig-1"]
+
+
 def test_schema_enables_rls_and_revokes_anon_access():
     sql = Path("supabase/schema.sql").read_text().lower()
     for table in ["companies", "molecules", "company_molecules", "signals", "opportunities", "opportunity_signals", "crawl_runs", "crawl_domains"]:

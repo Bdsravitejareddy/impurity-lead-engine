@@ -1,4 +1,4 @@
-from impurity_leads.aggregate import aggregate_opportunities
+from impurity_leads.aggregate import aggregate_candidates, aggregate_opportunities
 from impurity_leads.classify import classify_signal, looks_like_impurity_vendor
 from impurity_leads.dedupe import signal_fingerprint
 from impurity_leads.models import Opportunity, Signal, SourceRecord
@@ -103,7 +103,7 @@ def _record_signals(record: SourceRecord) -> list[Signal]:
     return output
 
 
-def process_records(records: list[SourceRecord], store: LeadStore) -> list[Opportunity]:
+def process_records_with_candidates(records: list[SourceRecord], store: LeadStore) -> tuple[list[Opportunity], list[dict]]:
     all_signals: list[Signal] = []
     vendor_companies: set[str] = set()
 
@@ -115,13 +115,20 @@ def process_records(records: list[SourceRecord], store: LeadStore) -> list[Oppor
             if signal.signal_type == "impurity_vendor_exclusion":
                 vendor_companies.add(normalize_company_name(signal.company_name))
 
-    qualified_signals = [
+    eligible_signals = [
         signal
         for signal in all_signals
         if normalize_company_name(signal.company_name) not in vendor_companies
         and signal.signal_type != "impurity_vendor_exclusion"
     ]
-    opportunities = aggregate_opportunities(qualified_signals)
+    candidates = aggregate_candidates(eligible_signals)
+    opportunities = [opportunity for opportunity in aggregate_opportunities(eligible_signals)]
     for opportunity in opportunities:
         store.save_opportunity(opportunity)
+    return opportunities, candidates
+
+
+def process_records(records: list[SourceRecord], store: LeadStore) -> list[Opportunity]:
+    """Preserve the established API while retaining candidates in the daily stage."""
+    opportunities, _ = process_records_with_candidates(records, store)
     return opportunities

@@ -24,19 +24,27 @@ def _priority(score: int, signal_types: set[str]) -> str | None:
 
 
 def aggregate_opportunities(signals: list[Signal]) -> list[Opportunity]:
+    return [Opportunity(**candidate) for candidate in aggregate_candidates(signals) if candidate["priority"] is not None]
+
+
+def aggregate_candidates(signals: list[Signal]) -> list[dict]:
+    """Aggregate every resolved company/molecule pair, including unqualified ones.
+
+    Qualification remains controlled by ``priority``; retaining the candidate
+    metadata allows later signals to rescore and promote the same pair without
+    creating a duplicate opportunity.
+    """
     grouped: dict[tuple[str, str], list[Signal]] = defaultdict(list)
     for signal in signals:
         if signal.company_name and signal.molecule_name:
             grouped[(signal.company_name, signal.molecule_name)].append(signal)
 
-    output: list[Opportunity] = []
+    output: list[dict] = []
     for (company, molecule), group in grouped.items():
         unique = list({s.fingerprint: s for s in group}.values())
         score = score_signals(unique)
         signal_types = {s.signal_type for s in unique}
         priority = _priority(score, signal_types)
-        if priority is None:
-            continue
 
         needs = sorted({s.metadata_json.get("need_type", s.signal_type) for s in unique})
         roles: list[str] = []
@@ -47,17 +55,15 @@ def aggregate_opportunities(signals: list[Signal]) -> list[Opportunity]:
 
         latest = max((s.event_date or s.discovered_at for s in unique), default=None)
         rationale = "; ".join(sorted({s.signal_type.replace("_", " ") for s in unique}))
-        output.append(
-            Opportunity(
-                company_name=company,
-                molecule_name=molecule,
-                score=score,
-                priority=priority,
-                likely_need_type=needs,
-                rationale=rationale,
-                decision_maker_role=roles[:3],
-                signal_fingerprints=[s.fingerprint for s in unique],
-                last_signal_at=latest,
-            )
-        )
-    return sorted(output, key=lambda item: item.score, reverse=True)
+        output.append({
+            "company_name": company,
+            "molecule_name": molecule,
+            "score": score,
+            "priority": priority,
+            "likely_need_type": needs,
+            "rationale": rationale,
+            "decision_maker_role": roles[:3],
+            "signal_fingerprints": [s.fingerprint for s in unique],
+            "last_signal_at": latest,
+        })
+    return sorted(output, key=lambda item: item["score"], reverse=True)

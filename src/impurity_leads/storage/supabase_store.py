@@ -99,6 +99,22 @@ class SupabaseLeadStore:
                 on_conflict="opportunity_id,signal_id",
             ).execute()
 
+    def save_candidate(self, candidate: dict) -> None:
+        """Retain a resolved pair even before it reaches the sales threshold."""
+        company_id = self._company_id(str(candidate["company_name"]))
+        molecule_id = self._molecule_id(str(candidate["molecule_name"]))
+        self.client.table("company_molecules").upsert({
+            "id": str(_stable_uuid("company-molecule", f"{company_id}:{molecule_id}")),
+            "company_id": company_id,
+            "molecule_id": molecule_id,
+            "candidate_score": candidate.get("score"),
+            "candidate_status": "QUALIFIED" if candidate.get("priority") else "UNQUALIFIED",
+            "candidate_rationale": candidate.get("rationale") or "",
+            "candidate_signal_fingerprints": candidate.get("signal_fingerprints") or [],
+            "candidate_last_signal_at": candidate.get("last_signal_at").isoformat() if hasattr(candidate.get("last_signal_at"), "isoformat") else candidate.get("last_signal_at"),
+            "candidate_last_evaluated_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="company_id,molecule_id").execute()
+
     def _contact_id(self, company_id: str, normalized_name: str) -> str:
         return str(_stable_uuid("contact", f"{company_id}:{normalized_name}"))
 

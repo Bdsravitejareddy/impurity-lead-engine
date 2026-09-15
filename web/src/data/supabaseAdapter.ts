@@ -13,7 +13,7 @@ export async function loadSupabaseData() {
     supabase.from('molecules').select('id,canonical_name'),
     supabase.from('opportunity_contacts').select('opportunity_id,contact_id,role_fit_score,rank,rationale'),
     supabase.from('contact_evidence').select('contact_id,source_url,evidence_type,observed_at,evidence_text,source_type,metadata_json'),
-    supabase.from('crawl_runs').select('id,started_at,completed_at,source_adapter,status,records_seen,records_inserted,errors,duration_seconds').order('started_at', { ascending: false }).limit(10),
+    supabase.from('crawl_runs').select('id,started_at,completed_at,source_adapter,status,records_seen,records_inserted,errors,duration_seconds,metrics_json').order('started_at', { ascending: false }).limit(10),
     supabase.from('contact_sources').select('*'),
     supabase.from('contact_positions').select('*'),
     supabase.from('contact_education').select('*'),

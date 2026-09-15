@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from impurity_leads.models import SourceRecord
-from impurity_leads.pipeline import process_records
+from impurity_leads.pipeline import process_records, process_records_with_candidates
 from impurity_leads.storage.memory import MemoryLeadStore
 
 
@@ -52,3 +52,13 @@ def test_pipeline_never_qualifies_known_impurity_vendor():
     ]
     store = MemoryLeadStore()
     assert process_records(records, store) == []
+
+
+def test_pipeline_returns_resolved_unqualified_candidate_for_persistence():
+    now = datetime.now(timezone.utc)
+    records = [SourceRecord(source_name="regulatory", source_type="regulatory", source_url="https://reg.example/y",
+                             fetched_at=now, published_at=now, company_name_raw="New Pharma", molecule_name_raw="Drug Y",
+                             signal_text="Regulatory application", metadata_json={"application_number": "ANDA-1"})]
+    opportunities, candidates = process_records_with_candidates(records, MemoryLeadStore())
+    assert opportunities == []
+    assert candidates and candidates[0]["priority"] is None
