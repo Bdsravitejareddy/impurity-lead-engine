@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from impurity_leads.aggregate import aggregate_candidates, aggregate_opportunities
 from impurity_leads.models import Signal
@@ -42,13 +42,14 @@ def test_low_score_resolved_pair_is_retained_as_candidate_for_later_rescoring():
 
 def test_existing_pair_is_rescored_and_promoted_when_new_evidence_arrives():
     now = datetime.now(timezone.utc)
+    event_date = now - timedelta(days=400)
     day_one = Signal(company_name="Rescore Pharma", molecule_name="Drug Z", source_type="regulatory",
                      signal_type="regulatory_application", source_url="https://regulatory.example/z",
-                     evidence_text="Application", event_date=now, discovered_at=now, base_weight=22, confidence=1.0,
+                     evidence_text="Application", event_date=event_date, discovered_at=now, base_weight=30, confidence=1.0,
                      fingerprint="rescore-1")
     day_two = Signal(company_name="Rescore Pharma", molecule_name="Drug Z", source_type="publication",
                      signal_type="impurity_characterization", source_url="https://journal.example/z",
-                     evidence_text="Impurity characterization", event_date=now, discovered_at=now, base_weight=10, confidence=1.0,
+                     evidence_text="Impurity characterization", event_date=event_date, discovered_at=now, base_weight=15, confidence=1.0,
                      fingerprint="rescore-2")
     first = aggregate_candidates([day_one])[0]
     second = aggregate_candidates([day_one, day_two])[0]
