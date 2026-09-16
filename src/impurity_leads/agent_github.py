@@ -112,6 +112,12 @@ def select_ready_agent_jobs(rows: list[dict[str, Any]], *, limit: int = 5, conta
     if molecules and len(selected_ids) < limit:
         selected_ids.add(str(molecules[0].get("id")))
         reserved.append(molecules[0])
+    # Candidate enrichment is deliberately bounded but must make progress in
+    # the same cycle; reserve up to two slots when eligible opportunity jobs
+    # exist so high-priority molecule work cannot starve them.
+    for opportunity in opportunities[:min(2, max(0, limit - len(selected_ids)))]:
+        selected_ids.add(str(opportunity.get("id")))
+        reserved.append(opportunity)
     remainder = [row for row in ordered if str(row.get("id")) not in selected_ids]
     selected = []
     opportunity_count = 0
