@@ -271,6 +271,18 @@ def _url_ok(value: Any) -> bool:
         return False
 
 
+def _underlying_public_url(value: Any) -> bool:
+    """Reject search-result URLs; Work must return the inspectable source."""
+    if not _url_ok(value):
+        return False
+    parsed = urlparse(str(value))
+    host = (parsed.hostname or "").lower()
+    path = (parsed.path or "").lower()
+    return not ((host.endswith("google.com") and path.startswith("/search")) or
+                (host.endswith("bing.com") and path.startswith("/search")) or
+                host.endswith("tavily.com"))
+
+
 def validate_agent_submission(payload: Any, *, job_id: str, seen_submission: bool = False, job_kind: str = "CONTACT_RESEARCH", job_context: dict[str, Any] | None = None) -> dict[str, Any]:
     """Validate safely; return partial accepted data plus field errors."""
     if isinstance(payload, str):
@@ -306,7 +318,7 @@ def validate_agent_submission(payload: Any, *, job_id: str, seen_submission: boo
             url = str(item.get("source_url") or "")
             signal_type = str(item.get("signal_type") or "").upper()
             text = str(item.get("evidence_text") or "").strip()
-            if not _url_ok(url) or url not in sources:
+            if not _underlying_public_url(url) or url not in sources:
                 errors.append({"path": f"evidence[{index}].source_url", "message": "underlying public source URL required"}); continue
             if signal_type not in allowed:
                 errors.append({"path": f"evidence[{index}].signal_type", "message": "unsupported opportunity evidence dimension"}); continue
