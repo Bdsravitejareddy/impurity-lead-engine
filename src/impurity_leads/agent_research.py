@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 from uuid import NAMESPACE_URL, uuid5
@@ -47,6 +48,13 @@ MOLECULE_OUTPUT_SCHEMA = {
     "remaining_unknowns": "array of strings", "recommended_next_queries": "array of strings",
 }
 
+OPPORTUNITY_EVIDENCE_OUTPUT_SCHEMA = {
+    "job_id": "string", "job_kind": "OPPORTUNITY_EVIDENCE", "company_id": "string", "molecule_id": "string",
+    "research_summary": "string",
+    "evidence": [{"source_url": "https://...", "source_title": "string", "publisher": "string", "source_date": None, "source_type": "string", "signal_type": "IMPURITY_CHARACTERIZATION|DEGRADATION_PRODUCT|STABILITY|REFERENCE_STANDARD|GENOTOXIC_IMPURITY|NITROSAMINE_NDSRI|ANALYTICAL_METHOD|REGULATORY_APPLICATION|DIRECT_IMPURITY_RFQ", "evidence_text": "string", "company_specific": True, "molecule_specific": True, "confidence": 0}],
+    "missing_dimensions_resolved": "array of strings", "remaining_unknowns": "array of strings", "recommended_next_queries": "array of strings",
+}
+
 ACTIVE_AGENT_STATUSES = {"QUEUED", "READY", "EXPORTED", "RESULT_SUBMITTED", "VALIDATING"}
 
 
@@ -75,7 +83,7 @@ def build_agent_research_prompt(job: dict[str, Any]) -> str:
     opportunity_score = job.get("opportunity_score", known_entities.get("opportunity_score", "UNKNOWN"))
     missing = job.get("missing_dimensions") or []
     job_kind = str(job.get("job_kind") or "CONTACT_RESEARCH")
-    schema = MOLECULE_OUTPUT_SCHEMA if job_kind == "MOLECULE_INTELLIGENCE" else OUTPUT_SCHEMA
+    schema = MOLECULE_OUTPUT_SCHEMA if job_kind == "MOLECULE_INTELLIGENCE" else OPPORTUNITY_EVIDENCE_OUTPUT_SCHEMA if job_kind == "OPPORTUNITY_EVIDENCE" else OUTPUT_SCHEMA
     return f"""Use Work mode with web research. Return only the requested JSON, with no markdown.
 
 You are assisting SVAK Intelligence with a bounded research task.
@@ -96,7 +104,9 @@ Known context
 - Known claims: {json.dumps(job.get('known_claims') or [], ensure_ascii=False)}
 - Quality before: {json.dumps(job.get('quality_before') or {}, ensure_ascii=False)}
 
-Research only the unresolved dimensions above. Prefer official/regulatory sources,
+Research only the unresolved dimensions above. For OPPORTUNITY_EVIDENCE, every finding
+must be specific to this exact company and molecule; generic molecule facts do not count.
+Never provide scores, priorities, qualification or promotion decisions. Prefer official/regulatory sources,
 publications, patents, conference or professional sources, public company pages,
 and reputable public directories. Return the underlying source URLs.
 
@@ -203,6 +213,49 @@ def queue_molecule_intelligence_job(client: Any, *, molecule: dict[str, Any], mi
             return None
 
 
+def queue_opportunity_evidence_job(client: Any, *, candidate: dict[str, Any], company_name: str, molecule_name: str, missing_dimensions: list[str], priority: int = 0, research_budget: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """Queue one bounded Work job for one retained company/molecule candidate."""
+    company_id = str(candidate.get("company_id") or "")
+    molecule_id = str(candidate.get("molecule_id") or "")
+    score = float(candidate.get("candidate_score") or 0)
+    if not company_id or not molecule_id or str(candidate.get("candidate_status") or "") != "UNQUALIFIED" or score >= 50:
+        return None
+    dimensions = sorted({str(item).strip().upper() for item in missing_dimensions if str(item).strip()})
+    if not dimensions:
+        return None
+    dedupe_key = active_agent_dedupe_key(f"{company_id}:{molecule_id}", dimensions, job_kind="OPPORTUNITY_EVIDENCE")
+    job = {
+        "job_kind": "OPPORTUNITY_EVIDENCE", "opportunity_id": None, "company_id": company_id,
+        "molecule_id": molecule_id, "candidate_id": str(candidate.get("id") or ""), "priority": int(priority),
+        "research_goal": f"Find company-specific evidence for {company_name} / {molecule_name}: {', '.join(dimensions)}",
+        "missing_dimensions": dimensions, "known_entities": {"company": company_name, "company_id": company_id, "molecule": molecule_name, "molecule_id": molecule_id},
+        "known_contacts": [], "known_sources": [{"fingerprint": fp} for fp in candidate.get("candidate_signal_fingerprints") or []],
+        "known_claims": [], "quality_before": {"candidate_score": candidate.get("candidate_score"), "candidate_status": candidate.get("candidate_status"), "distance_to_qualification": max(0, 50 - score)},
+        "research_budget": research_budget or {"max_rounds": 2, "max_sources": 10}, "attempt_count": 1, "last_attempt_at": datetime.now(timezone.utc).isoformat(), "dedupe_key": dedupe_key, "status": "READY",
+    }
+    job["agent_prompt"] = build_agent_research_prompt(job)
+    try:
+        rows = client.table("agent_research_jobs").select("*").eq("dedupe_key", dedupe_key).in_("status", list(ACTIVE_AGENT_STATUSES)).limit(1).execute().data or []
+        if rows:
+            existing = dict(rows[0]); existing["_deduped"] = True
+            return existing
+        history = client.table("agent_research_jobs").select("*").eq("dedupe_key", dedupe_key).limit(1).execute().data or []
+        if history:
+            previous = dict(history[0])
+            attempts = int(previous.get("attempt_count") or 1)
+            if attempts >= int((research_budget or {}).get("max_rounds", 2)) or str(previous.get("last_outcome") or "") == "NO_NEW_EVIDENCE":
+                previous["_deduped"] = True
+                return previous
+        rows = client.table("agent_research_jobs").insert(job).execute().data or []
+        return rows[0] if rows else job
+    except Exception:
+        try:
+            rows = client.table("agent_research_jobs").select("*").eq("dedupe_key", dedupe_key).limit(1).execute().data or []
+            return rows[0] if rows else None
+        except Exception:
+            return None
+
+
 def _url_ok(value: Any) -> bool:
     try:
         parsed = urlparse(str(value))
@@ -211,7 +264,7 @@ def _url_ok(value: Any) -> bool:
         return False
 
 
-def validate_agent_submission(payload: Any, *, job_id: str, seen_submission: bool = False, job_kind: str = "CONTACT_RESEARCH") -> dict[str, Any]:
+def validate_agent_submission(payload: Any, *, job_id: str, seen_submission: bool = False, job_kind: str = "CONTACT_RESEARCH", job_context: dict[str, Any] | None = None) -> dict[str, Any]:
     """Validate safely; return partial accepted data plus field errors."""
     if isinstance(payload, str):
         try:
@@ -226,8 +279,43 @@ def validate_agent_submission(payload: Any, *, job_id: str, seen_submission: boo
     if seen_submission:
         errors.append({"path": "$", "message": "duplicate submission"})
     actual_kind = str(payload.get("job_kind") or job_kind)
-    if actual_kind not in {"CONTACT_RESEARCH", "MOLECULE_INTELLIGENCE"}:
+    if actual_kind not in {"CONTACT_RESEARCH", "MOLECULE_INTELLIGENCE", "OPPORTUNITY_EVIDENCE"}:
         errors.append({"path": "job_kind", "message": "unsupported job kind"})
+    if actual_kind == "OPPORTUNITY_EVIDENCE":
+        context = job_context or {}
+        if str(payload.get("company_id") or "") != str(context.get("company_id") or ""):
+            errors.append({"path": "company_id", "message": "does not match staged candidate"})
+        if str(payload.get("molecule_id") or "") != str(context.get("molecule_id") or ""):
+            errors.append({"path": "molecule_id", "message": "does not match staged candidate"})
+        for field in ("score_after", "score", "priority", "qualified", "promotion_recommendation"):
+            if field in payload:
+                errors.append({"path": field, "message": "computed by backend; field is not accepted"})
+        allowed = {"IMPURITY_CHARACTERIZATION", "DEGRADATION_PRODUCT", "STABILITY", "REFERENCE_STANDARD", "GENOTOXIC_IMPURITY", "NITROSAMINE_NDSRI", "ANALYTICAL_METHOD", "REGULATORY_APPLICATION", "DIRECT_IMPURITY_RFQ"}
+        accepted = []
+        sources = {str(source.get("url")): source for source in (payload.get("sources") or []) if isinstance(source, dict) and _url_ok(source.get("url"))}
+        for index, item in enumerate(payload.get("evidence") or []):
+            if not isinstance(item, dict):
+                errors.append({"path": f"evidence[{index}]", "message": "object required"}); continue
+            url = str(item.get("source_url") or "")
+            signal_type = str(item.get("signal_type") or "").upper()
+            text = str(item.get("evidence_text") or "").strip()
+            if not _url_ok(url) or url not in sources:
+                errors.append({"path": f"evidence[{index}].source_url", "message": "underlying public source URL required"}); continue
+            if signal_type not in allowed:
+                errors.append({"path": f"evidence[{index}].signal_type", "message": "unsupported opportunity evidence dimension"}); continue
+            if not text:
+                errors.append({"path": f"evidence[{index}].evidence_text", "message": "evidence text required"}); continue
+            if item.get("company_specific") is not True or item.get("molecule_specific") is not True:
+                errors.append({"path": f"evidence[{index}]", "message": "company and molecule specificity required"}); continue
+            if str(sources[url].get("access_status") or "PUBLIC").upper() != "PUBLIC":
+                errors.append({"path": f"evidence[{index}].source_url", "message": "source is not publicly accessible"}); continue
+            accepted.append({**item, "signal_type": signal_type, "source_url": url})
+        data = {key: value for key, value in payload.items() if key not in {"score_after", "score", "priority", "qualified", "promotion_recommendation"}}
+        data.update({"job_id": str(job_id), "job_kind": actual_kind, "evidence": accepted, "sources": list(sources.values())})
+        # Item-level failures are retained for observability while good independent
+        # evidence can continue through the staging boundary.
+        fatal = any(item["path"] in {"job_id", "company_id", "molecule_id", "job_kind", "score_after", "score", "priority", "qualified", "promotion_recommendation"} for item in errors)
+        return {"valid": not fatal, "errors": errors, "data": data}
     if actual_kind == "MOLECULE_INTELLIGENCE":
         molecule = payload.get("molecule") if isinstance(payload.get("molecule"), dict) else {}
         if not str(molecule.get("canonical_name") or "").strip():
@@ -323,6 +411,46 @@ def _apply_molecule_research(client: Any, *, job: dict[str, Any], validated: dic
     return {"status": "APPLIED" if claims else "PARTIAL", "molecule_id": molecule_id, "claims_accepted": len(claims), "graph_entities": 1 if entity_id else 0, **section_metrics}
 
 
+def _apply_opportunity_evidence(client: Any, *, job: dict[str, Any], validated: dict[str, Any]) -> dict[str, Any]:
+    """Convert accepted Work evidence into SourceRecords and use the normal scorer."""
+    from impurity_leads.candidate_enrichment import enrich_candidate
+    data = validated.get("data") or {}
+    known = job.get("known_entities") or {}
+    company_id = str(job.get("company_id") or known.get("company_id") or "")
+    molecule_id = str(job.get("molecule_id") or known.get("molecule_id") or "")
+    company_name = str(known.get("company") or "").strip()
+    molecule_name = str(known.get("molecule") or "").strip()
+    records = []
+    for index, item in enumerate(data.get("evidence") or []):
+        source_date = None
+        if item.get("source_date"):
+            try:
+                source_date = datetime.fromisoformat(str(item["source_date"]).replace("Z", "+00:00"))
+            except ValueError:
+                pass
+        records.append(SourceRecord(
+            source_name=str(item.get("source_title") or item.get("source_url")),
+            source_type=str(item.get("source_type") or "public_web"),
+            source_record_id=f"work:{job.get('id')}:{index}:{item.get('source_url')}",
+            source_url=str(item.get("source_url")), published_at=source_date,
+            fetched_at=datetime.now(timezone.utc), company_name_raw=company_name,
+            molecule_name_raw=molecule_name, signal_text=str(item.get("evidence_text")),
+            metadata_json={"company_specific": True, "molecule_specific": True, "source_class": (next((s.get("suggested_source_class") for s in data.get("sources") or [] if s.get("url") == item.get("source_url")), "DISCOVERY_WEAK")), "work_job_id": job.get("id"), "work_signal_type": str(item.get("signal_type") or "").upper()},
+        ))
+    if not company_id or not molecule_id or not company_name or not molecule_name:
+        return {"status": "PARTIAL", "outcome": "FAILED", "reason": "candidate_context_missing", "evidence_accepted": 0}
+    result = enrich_candidate(client, company_id=company_id, molecule_id=molecule_id, company_name=company_name, molecule_name=molecule_name, records=records)
+    result["evidence_accepted"] = len(records)
+    result["evidence_rejected"] = len(validated.get("errors") or [])
+    result["outcome"] = "PROMOTED" if result.get("promoted") else ("ENRICHED_BUT_UNQUALIFIED" if result.get("new_signals") else "NO_NEW_EVIDENCE")
+    result["status"] = "APPLIED"
+    try:
+        client.table("company_molecules").update({"candidate_last_enrichment_at": datetime.now(timezone.utc).isoformat(), "candidate_last_enrichment_outcome": result["outcome"]}).eq("company_id", company_id).eq("molecule_id", molecule_id).execute()
+    except Exception:
+        pass
+    return result
+
+
 def apply_validated_agent_research(client: Any, *, job: dict[str, Any], validated: dict[str, Any]) -> dict[str, Any]:
     """Apply only structurally valid, source-attributed findings.
 
@@ -332,6 +460,8 @@ def apply_validated_agent_research(client: Any, *, job: dict[str, Any], validate
     """
     if str(job.get("job_kind") or "CONTACT_RESEARCH") == "MOLECULE_INTELLIGENCE":
         return _apply_molecule_research(client, job=job, validated=validated)
+    if str(job.get("job_kind") or "CONTACT_RESEARCH") == "OPPORTUNITY_EVIDENCE":
+        return _apply_opportunity_evidence(client, job=job, validated=validated)
     data = validated.get("data") or {}
     opportunity_id = str(job.get("opportunity_id") or "")
     known = job.get("known_entities") or {}

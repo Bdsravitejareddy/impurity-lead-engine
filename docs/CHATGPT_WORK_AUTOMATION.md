@@ -47,8 +47,12 @@ Post exactly one result comment per processed issue. Put JSON only between:
 { ... }
 <!-- SVAK_WORK_RESULT_END -->
 
-The JSON must contain job_id, research_summary, people, sources,
-missing_dimensions_resolved, remaining_unknowns, and recommended_next_queries.
+For `CONTACT_RESEARCH`, the JSON must contain job_id, research_summary, people,
+sources, missing_dimensions_resolved, remaining_unknowns, and
+recommended_next_queries. For `MOLECULE_INTELLIGENCE`, use its molecule claims
+schema. For `OPPORTUNITY_EVIDENCE`, return exact company_id and molecule_id
+plus an `evidence` array specific to both. Never include score, priority,
+qualification, or promotion fields; SVAK computes those from accepted signals.
 Each source needs a public URL and access_status. Each claim must state
 proposed_provenance OBSERVED or INFERRED and include source_urls when
 OBSERVED. Use null or UNKNOWN for missing values. Never manufacture sources.
@@ -78,3 +82,10 @@ the Work response itself is never evidence. Accepted claims become
 `research_claims` with `MOLECULE_CONTEXT` attribution and drive reusable
 `molecule_intelligence_sections` for every company opportunity sharing that
 molecule.
+
+## Opportunity evidence jobs
+
+`OPPORTUNITY_EVIDENCE` jobs target one retained, unqualified company/molecule
+candidate and request only missing evidence dimensions. Generic molecule facts
+do not satisfy the job. Accepted evidence is converted to the existing
+`SourceRecord` and signal pipeline; scores and promotion remain backend-only.

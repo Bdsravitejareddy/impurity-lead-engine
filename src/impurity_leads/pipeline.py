@@ -1,5 +1,5 @@
 from impurity_leads.aggregate import aggregate_candidates, aggregate_opportunities
-from impurity_leads.classify import classify_signal, looks_like_impurity_vendor
+from impurity_leads.classify import RULES, classify_signal, looks_like_impurity_vendor
 from impurity_leads.dedupe import signal_fingerprint
 from impurity_leads.models import Opportunity, Signal, SourceRecord
 from impurity_leads.normalize import normalize_company_name, normalize_molecule_name
@@ -58,6 +58,21 @@ def _record_signals(record: SourceRecord) -> list[Signal]:
                 metadata_json={"need_type": need_type, **record.metadata_json},
             )
         )
+
+    # Work opportunity-evidence results carry a validated, bounded signal type.
+    # Preserve the normal classifier as authoritative, but allow the explicit
+    # type to map to its existing rule when wording differs from the canonical
+    # phrase (for example a regulatory PDF's table heading).
+    forced = str(record.metadata_json.get("work_signal_type") or "").upper()
+    forced_map = {"ANALYTICAL_METHOD": "method_validation", "DEGRADATION_PRODUCT": "degradation_product", "IMPURITY_CHARACTERIZATION": "impurity_characterization", "REFERENCE_STANDARD": "reference_standard", "GENOTOXIC_IMPURITY": "genotoxic_impurity", "NITROSAMINE_NDSRI": "nitrosamine_ndsri", "STABILITY": "stability", "REGULATORY_APPLICATION": "regulatory_application", "DIRECT_IMPURITY_RFQ": "direct_impurity_rfq"}
+    forced_type = forced_map.get(forced)
+    existing_types = {signal.signal_type for signal in output}
+    if forced_type and forced_type not in existing_types:
+        rule = next((item for item in RULES if item.signal_type == forced_type), None)
+        if rule is None and forced_type == "regulatory_application":
+            rule = type("RuleValue", (), {"signal_type": "regulatory_application", "need_type": "regulatory/CMC activity", "weight_with_molecule": 22, "weight_without_molecule": 0})()
+        if rule:
+            output.append(Signal(company_name=company_display, molecule_name=molecule_display, source_type=record.source_type, signal_type=rule.signal_type, source_url=record.source_url, source_record_id=record.source_record_id, evidence_text=record.signal_text[:800], event_date=record.published_at, discovered_at=discovered_at, base_weight=rule.weight_with_molecule if molecule_display else rule.weight_without_molecule, confidence=1.0, fingerprint=signal_fingerprint(company_key, molecule_key, rule.signal_type, record.source_url, record.signal_text[:800]), metadata_json={"need_type": rule.need_type, **record.metadata_json}))
 
     phase = str(record.metadata_json.get("phase") or "").upper()
     if molecule_display and phase in _PHASE_WEIGHTS:

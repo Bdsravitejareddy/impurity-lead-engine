@@ -39,6 +39,8 @@ create table if not exists public.company_molecules (
   candidate_signal_fingerprints text[] not null default '{}',
   candidate_last_signal_at timestamptz,
   candidate_last_evaluated_at timestamptz,
+  candidate_last_enrichment_at timestamptz,
+  candidate_last_enrichment_outcome text,
   first_seen_at timestamptz not null default now(),
   last_seen_at timestamptz not null default now(),
   unique(company_id, molecule_id)
@@ -495,3 +497,15 @@ grant all on public.molecule_intelligence_sections to service_role;
 alter table if exists public.agent_research_jobs add column if not exists job_kind text not null default 'CONTACT_RESEARCH';
 alter table if exists public.agent_research_jobs add column if not exists molecule_id uuid references public.molecules(id) on delete cascade;
 alter table if exists public.agent_research_jobs alter column opportunity_id drop not null;
+alter table if exists public.agent_research_jobs add column if not exists company_id uuid references public.companies(id) on delete cascade;
+alter table if exists public.agent_research_jobs add column if not exists candidate_id uuid references public.company_molecules(id) on delete cascade;
+alter table if exists public.agent_research_jobs add column if not exists research_budget jsonb not null default '{}'::jsonb;
+alter table if exists public.agent_research_jobs add column if not exists attempt_count integer not null default 0;
+alter table if exists public.agent_research_jobs add column if not exists last_attempt_at timestamptz;
+alter table if exists public.agent_research_jobs add column if not exists last_outcome text;
+alter table if exists public.agent_research_jobs drop constraint if exists agent_research_jobs_kind_check;
+alter table if exists public.agent_research_jobs add constraint agent_research_jobs_kind_check check (
+  (job_kind = 'CONTACT_RESEARCH' and opportunity_id is not null and molecule_id is null and company_id is null and candidate_id is null)
+  or (job_kind = 'MOLECULE_INTELLIGENCE' and molecule_id is not null and opportunity_id is null and company_id is null and candidate_id is null)
+  or (job_kind = 'OPPORTUNITY_EVIDENCE' and company_id is not null and molecule_id is not null and candidate_id is not null and opportunity_id is null)
+);

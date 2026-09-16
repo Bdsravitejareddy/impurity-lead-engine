@@ -5,6 +5,7 @@ from impurity_leads.cli import main
 from impurity_leads.config import load_settings
 from impurity_leads.contact_research import run_pending_contact_research
 from impurity_leads.targeted_research_jobs import run_pending_targeted_jobs
+from impurity_leads.opportunity_enrichment import run_pending_opportunity_enrichment
 from impurity_leads.agent_github import export_ready_agent_jobs
 
 
@@ -24,6 +25,11 @@ if __name__ == "__main__":
         print(json.dumps({"event": "targeted_research", **result}, sort_keys=True))
     except Exception as exc:
         print(json.dumps({"event": "targeted_research_failed", "error": type(exc).__name__, "message": str(exc)[:240]}, sort_keys=True))
+    try:
+        result = run_pending_opportunity_enrichment(load_settings(), limit=2)
+        print(json.dumps({"event": "opportunity_evidence_queue", **result}, sort_keys=True))
+    except Exception as exc:
+        print(json.dumps({"event": "opportunity_evidence_queue_failed", "error": type(exc).__name__}, sort_keys=True))
     try:
         settings = load_settings()
         if getattr(settings, "supabase_url", None) and getattr(settings, "supabase_secret_key", None) and os.environ.get("GITHUB_REPOSITORY"):

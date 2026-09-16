@@ -25,8 +25,10 @@ def build_issue_payload(job: dict[str, Any]) -> dict[str, Any]:
     return {
         "agent_job_id": str(job.get("id") or ""),
         "job_kind": job_kind,
-        "opportunity_id": str(job.get("opportunity_id") or ""),
+        "opportunity_id": str(job.get("opportunity_id")) if job.get("opportunity_id") else None,
         "molecule_id": str(job.get("molecule_id") or known.get("molecule_id") or ""),
+        "company_id": str(job.get("company_id") or known.get("company_id") or ""),
+        "candidate_id": str(job.get("candidate_id") or ""),
         "company": known.get("company") or job.get("company") or "UNKNOWN",
         "molecule": known.get("molecule") or job.get("molecule") or "UNKNOWN",
         "opportunity_score": known.get("opportunity_score", job.get("priority")),
@@ -103,10 +105,25 @@ def select_ready_agent_jobs(rows: list[dict[str, Any]], *, limit: int = 5, conta
         return []
     ordered = sorted(rows, key=lambda row: int(row.get("priority") or 0), reverse=True)
     contacts = [row for row in ordered if str(row.get("job_kind") or "CONTACT_RESEARCH") == "CONTACT_RESEARCH"]
+    molecules = [row for row in ordered if str(row.get("job_kind") or "CONTACT_RESEARCH") == "MOLECULE_INTELLIGENCE"]
+    opportunities = [row for row in ordered if str(row.get("job_kind") or "CONTACT_RESEARCH") == "OPPORTUNITY_EVIDENCE"]
     reserved = contacts[:min(max(contact_reserve, 0), limit)]
     selected_ids = {str(row.get("id")) for row in reserved}
+    if molecules and len(selected_ids) < limit:
+        selected_ids.add(str(molecules[0].get("id")))
+        reserved.append(molecules[0])
     remainder = [row for row in ordered if str(row.get("id")) not in selected_ids]
-    return (reserved + remainder)[:limit]
+    selected = []
+    opportunity_count = 0
+    for row in reserved + remainder:
+        if len(selected) >= limit:
+            break
+        if str(row.get("job_kind") or "CONTACT_RESEARCH") == "OPPORTUNITY_EVIDENCE":
+            if opportunity_count >= 2:
+                continue
+            opportunity_count += 1
+        selected.append(row)
+    return selected
 
 
 def export_ready_agent_jobs(client: Any, *, repo: str, limit: int = 5) -> dict[str, Any]:
@@ -118,13 +135,15 @@ def export_ready_agent_jobs(client: Any, *, repo: str, limit: int = 5) -> dict[s
     contact_rows = base.eq("job_kind", "CONTACT_RESEARCH").order("priority", desc=True).limit(limit).execute().data or []
     legacy_contact_rows = base.is_("job_kind", "null").order("priority", desc=True).limit(limit).execute().data or []
     molecule_rows = base.eq("job_kind", "MOLECULE_INTELLIGENCE").order("priority", desc=True).limit(limit).execute().data or []
-    rows = select_ready_agent_jobs(contact_rows + legacy_contact_rows + molecule_rows, limit=limit, contact_reserve=2)
+    opportunity_rows = base.eq("job_kind", "OPPORTUNITY_EVIDENCE").order("priority", desc=True).limit(2).execute().data or []
+    rows = select_ready_agent_jobs(contact_rows + legacy_contact_rows + molecule_rows + opportunity_rows, limit=limit, contact_reserve=2)
     exported = []
     errors = []
     for job in rows:
         kind = str(job.get("job_kind") or "CONTACT_RESEARCH")
         title = f"[SVAK Research] {job.get('known_entities', {}).get('company', 'Molecule')} / {job.get('known_entities', {}).get('molecule', 'Molecule')} / {','.join(job.get('missing_dimensions') or [])}"
         if kind == "MOLECULE_INTELLIGENCE": title = f"[SVAK Molecule] {job.get('known_entities', {}).get('molecule', 'Molecule')} / {','.join(job.get('missing_dimensions') or [])}"
+        if kind == "OPPORTUNITY_EVIDENCE": title = f"[SVAK Opportunity] {job.get('known_entities', {}).get('company', 'Company')} / {job.get('known_entities', {}).get('molecule', 'Molecule')} / {','.join(job.get('missing_dimensions') or [])}"
         try:
             for label in ("svak-work-ready", "svak-research", "priority-high" if int(job.get("priority") or 0) >= 85 else "priority-normal"):
                 try:

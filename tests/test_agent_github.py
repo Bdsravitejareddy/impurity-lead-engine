@@ -59,3 +59,16 @@ def test_ready_job_selection_reserves_capacity_for_contact_research():
     selected = select_ready_agent_jobs(rows, limit=5, contact_reserve=2)
     assert [row["id"] for row in selected[:2]] == ["c1", "c2"]
     assert {row["job_kind"] for row in selected} == {"CONTACT_RESEARCH", "MOLECULE_INTELLIGENCE"}
+
+
+def test_ready_job_selection_caps_opportunity_evidence_and_keeps_fair_share():
+    rows = [
+        {"id": "c1", "job_kind": "CONTACT_RESEARCH", "priority": 10},
+        {"id": "m1", "job_kind": "MOLECULE_INTELLIGENCE", "priority": 100},
+        {"id": "o1", "job_kind": "OPPORTUNITY_EVIDENCE", "priority": 99},
+        {"id": "o2", "job_kind": "OPPORTUNITY_EVIDENCE", "priority": 98},
+        {"id": "o3", "job_kind": "OPPORTUNITY_EVIDENCE", "priority": 97},
+    ]
+    selected = select_ready_agent_jobs(rows, limit=5, contact_reserve=1)
+    assert {row["job_kind"] for row in selected} >= {"CONTACT_RESEARCH", "MOLECULE_INTELLIGENCE"}
+    assert sum(row["job_kind"] == "OPPORTUNITY_EVIDENCE" for row in selected) == 2
