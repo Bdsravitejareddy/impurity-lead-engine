@@ -223,13 +223,14 @@ def queue_opportunity_evidence_job(client: Any, *, candidate: dict[str, Any], co
     dimensions = sorted({str(item).strip().upper() for item in missing_dimensions if str(item).strip()})
     if not dimensions:
         return None
-    dedupe_key = active_agent_dedupe_key(f"{company_id}:{molecule_id}", dimensions, job_kind="OPPORTUNITY_EVIDENCE")
+    base_dedupe_key = active_agent_dedupe_key(f"{company_id}:{molecule_id}", dimensions, job_kind="OPPORTUNITY_EVIDENCE")
+    dedupe_key = base_dedupe_key
     job = {
         "job_kind": "OPPORTUNITY_EVIDENCE", "opportunity_id": None, "company_id": company_id,
         "molecule_id": molecule_id, "candidate_id": str(candidate.get("id") or ""), "priority": int(priority),
         "research_goal": f"Find company-specific evidence for {company_name} / {molecule_name}: {', '.join(dimensions)}",
         "missing_dimensions": dimensions, "known_entities": {"company": company_name, "company_id": company_id, "molecule": molecule_name, "molecule_id": molecule_id},
-        "known_contacts": [], "known_sources": [{"fingerprint": fp} for fp in candidate.get("candidate_signal_fingerprints") or []],
+        "known_contacts": [], "known_sources": candidate.get("known_sources") or [{"fingerprint": fp} for fp in candidate.get("candidate_signal_fingerprints") or []],
         "known_claims": [], "quality_before": {"candidate_score": candidate.get("candidate_score"), "candidate_status": candidate.get("candidate_status"), "distance_to_qualification": max(0, 50 - score)},
         "research_budget": research_budget or {"max_rounds": 2, "max_sources": 10}, "attempt_count": 1, "last_attempt_at": datetime.now(timezone.utc).isoformat(), "dedupe_key": dedupe_key, "status": "READY",
     }
@@ -246,6 +247,12 @@ def queue_opportunity_evidence_job(client: Any, *, candidate: dict[str, Any], co
             if attempts >= int((research_budget or {}).get("max_rounds", 2)) or str(previous.get("last_outcome") or "") == "NO_NEW_EVIDENCE":
                 previous["_deduped"] = True
                 return previous
+            # A completed, useful-but-insufficient round may have its same
+            # candidate researched once more. Keep active dedupe strict while
+            # using a deterministic round suffix for the new issue.
+            dedupe_key = f"{base_dedupe_key}:round{attempts + 1}"
+            job["dedupe_key"] = dedupe_key
+            job["attempt_count"] = attempts + 1
         rows = client.table("agent_research_jobs").insert(job).execute().data or []
         return rows[0] if rows else job
     except Exception:

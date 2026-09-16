@@ -82,6 +82,7 @@ def run_pending_opportunity_enrichment(settings: Any, *, limit: int = 2) -> dict
             continue
         item = dict(row)
         item["missing_dimensions"] = dimensions[:2]
+        item["known_sources"] = [signals_by_fp[str(fp)] for fp in (row.get("candidate_signal_fingerprints") or []) if str(fp) in signals_by_fp]
         item["_rank"] = (float(row.get("candidate_score") or 0), len(row.get("candidate_signal_fingerprints") or []))
         eligible.append(item)
     ranked = rank_candidates(eligible, signals_by_fp)
