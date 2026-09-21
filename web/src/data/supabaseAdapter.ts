@@ -1,39 +1,81 @@
 import { supabase } from './supabase'
 import { emptyIntelligence, normalizeContactIntelligence } from './contactIntelligence'
 import { buildCanonicalContacts, groupEvidenceBySource, rankContactsForOpportunity, readCurrentRoleConfidence, summarizeOpportunityMetrics, summarizeWorkState } from './integrity'
+import { DEFAULT_QUERY_TIMEOUT_MS, loadWithTimeout } from './loadGuard'
 
-export async function loadSupabaseData() {
+export const CORE_QUERY_TIMEOUT_MS = DEFAULT_QUERY_TIMEOUT_MS
+export const SECONDARY_QUERY_TIMEOUT_MS = 3_000
+
+type QueryResponse = { data: any[] | null; error: any | null }
+type QueryBuilder = (signal: AbortSignal) => PromiseLike<QueryResponse>
+
+function recordQueryFailure(name: string, diagnostics: string[]) {
+  const code = `supabase_query_failed:${name}`
+  diagnostics.push(code)
+  if (typeof console !== 'undefined' && typeof console.warn === 'function') console.warn(code)
+  return new Error(code)
+}
+
+async function runCoreQuery(name: string, query: QueryBuilder, diagnostics: string[], timeoutMs: number): Promise<QueryResponse> {
+  const result = await loadWithTimeout(name, query, { timeoutMs, diagnostics })
+  if (result.error) throw recordQueryFailure(name, diagnostics)
+  return result
+}
+
+async function runOptionalQuery(name: string, query: QueryBuilder, diagnostics: string[], timeoutMs: number): Promise<QueryResponse> {
+  try {
+    return await runCoreQuery(name, query, diagnostics, timeoutMs)
+  } catch {
+    // Secondary intelligence is allowed to degrade to an empty read model. The
+    // diagnostic remains available to the caller and the console without
+    // fabricating any evidence.
+    return { data: [], error: null }
+  }
+}
+
+export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}) {
   if (!supabase) throw new Error('supabase_not_configured')
-  const [opportunities, allOpportunities, signals, contacts, companies, molecules, opportunityContacts, contactEvidence, runs, sources, positions, education, works, problems, themes, jtbd, claims, notes, history, conflicts, researchRuns, targetedJobs, agentJobs, agentSubmissions, moleculeSections, researchClaims, researchEntities] = await Promise.all([
-    supabase.from('opportunities').select('*, companies(*), molecules(*)').gte('score', 50).neq('status', 'dismissed').order('score', { ascending: false }),
-    supabase.from('opportunities').select('id,status,score,priority'),
-    supabase.from('signals').select('id,company_id,molecule_id,source_type,signal_type,source_url,source_record_id,evidence_text,event_date,confidence,base_weight,fingerprint').order('event_date', { ascending: false }),
-    supabase.from('contacts').select('id,company_id,display_name,title,department,profile_url,primary_email,email_status,primary_phone,phone_status,role_fit_score,contact_confidence,technical_relevance,quality_diagnostics,last_verified_at'),
-    supabase.from('companies').select('id,legal_name,normalized_name'),
-    supabase.from('molecules').select('id,canonical_name'),
-    supabase.from('opportunity_contacts').select('opportunity_id,contact_id,role_fit_score,rank,rationale'),
-    supabase.from('contact_evidence').select('contact_id,source_url,evidence_type,observed_at,evidence_text,source_type,metadata_json'),
-    supabase.from('crawl_runs').select('id,started_at,completed_at,source_adapter,status,records_seen,records_inserted,errors,duration_seconds,metrics_json').order('started_at', { ascending: false }).limit(10),
-    supabase.from('contact_sources').select('*'),
-    supabase.from('contact_positions').select('*'),
-    supabase.from('contact_education').select('*'),
-    supabase.from('contact_works').select('*'),
-    supabase.from('contact_problems').select('*'),
-    supabase.from('contact_themes').select('*'),
-    supabase.from('contact_jtbd').select('*'),
-    supabase.from('contact_claims').select('*'),
-    supabase.from('contact_notes').select('*'),
-    supabase.from('contact_history').select('*').order('changed_at', { ascending: false }),
-    supabase.from('contact_conflicts').select('*').eq('status','OPEN'),
-    supabase.from('contact_research_runs').select('*').order('created_at', { ascending: false }),
-    supabase.from('targeted_research_jobs').select('*').order('created_at', { ascending: false }).limit(100),
-    supabase.from('agent_research_jobs').select('*').order('created_at', { ascending: false }).limit(100),
-    supabase.from('agent_research_submissions').select('id,agent_job_id,validation_status,submitted_at,processed_at').order('submitted_at', { ascending: false }).limit(100),
-    supabase.from('molecule_intelligence_sections').select('*'),
-    supabase.from('research_claims').select('id,entity_id,claim_type,claim_text,source_url,source_class,attribution,provenance,confidence,created_at'),
-    supabase.from('research_entities').select('id,entity_type,canonical_name,metadata_json'),
+  const timeoutMs = options.queryTimeoutMs ?? CORE_QUERY_TIMEOUT_MS
+  const secondaryTimeoutMs = Math.min(timeoutMs, SECONDARY_QUERY_TIMEOUT_MS)
+  const diagnostics: string[] = []
+  // These reads are required to render the live opportunity/contact model.
+  // Every request receives an AbortSignal and has a hard deadline.
+  const [opportunities, allOpportunities, signals, contacts, companies, molecules] = await Promise.all([
+    runCoreQuery('opportunities', signal => supabase!.from('opportunities').select('*, companies(*), molecules(*)').gte('score', 50).neq('status', 'dismissed').order('score', { ascending: false }).abortSignal(signal), diagnostics, timeoutMs),
+    runCoreQuery('all_opportunities', signal => supabase!.from('opportunities').select('id,status,score,priority').abortSignal(signal), diagnostics, timeoutMs),
+    runCoreQuery('signals', signal => supabase!.from('signals').select('id,company_id,molecule_id,source_type,signal_type,source_url,source_record_id,evidence_text,event_date,confidence,base_weight,fingerprint').order('event_date', { ascending: false }).abortSignal(signal), diagnostics, timeoutMs),
+    runCoreQuery('contacts', signal => supabase!.from('contacts').select('id,company_id,display_name,title,department,profile_url,primary_email,email_status,primary_phone,phone_status,role_fit_score,contact_confidence,technical_relevance,quality_diagnostics,last_verified_at').abortSignal(signal), diagnostics, timeoutMs),
+    runCoreQuery('companies', signal => supabase!.from('companies').select('id,legal_name,normalized_name').abortSignal(signal), diagnostics, timeoutMs),
+    runCoreQuery('molecules', signal => supabase!.from('molecules').select('id,canonical_name').abortSignal(signal), diagnostics, timeoutMs),
   ])
-  for (const result of [opportunities, allOpportunities, signals, contacts, companies, molecules, opportunityContacts, contactEvidence, runs, sources, positions, education, works, problems, themes, jtbd, claims, notes, history, conflicts, researchRuns, targetedJobs, agentJobs, agentSubmissions, moleculeSections, researchClaims, researchEntities]) if (result.error) throw result.error
+
+  // These reads enrich Contact 360, molecule intelligence and diagnostics. A
+  // slow or unavailable secondary table must not make the executive dashboard
+  // unusable; its named failure remains visible in loadDiagnostics.
+  const [opportunityContacts, contactEvidence, runs, sources, positions, education, works, problems, themes, jtbd, claims, notes, history, conflicts, researchRuns, targetedJobs, agentJobs, agentSubmissions, moleculeSections, researchClaims, researchEntities] = await Promise.all([
+    runOptionalQuery('opportunity_contacts', signal => supabase!.from('opportunity_contacts').select('opportunity_id,contact_id,role_fit_score,rank,rationale').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_evidence', signal => supabase!.from('contact_evidence').select('contact_id,source_url,evidence_type,observed_at,evidence_text,source_type,metadata_json').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('crawl_runs', signal => supabase!.from('crawl_runs').select('id,started_at,completed_at,source_adapter,status,records_seen,records_inserted,errors,duration_seconds,metrics_json').order('started_at', { ascending: false }).limit(10).abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_sources', signal => supabase!.from('contact_sources').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_positions', signal => supabase!.from('contact_positions').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_education', signal => supabase!.from('contact_education').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_works', signal => supabase!.from('contact_works').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_problems', signal => supabase!.from('contact_problems').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_themes', signal => supabase!.from('contact_themes').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_jtbd', signal => supabase!.from('contact_jtbd').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_claims', signal => supabase!.from('contact_claims').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_notes', signal => supabase!.from('contact_notes').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_history', signal => supabase!.from('contact_history').select('*').order('changed_at', { ascending: false }).abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_conflicts', signal => supabase!.from('contact_conflicts').select('*').eq('status','OPEN').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_research_runs', signal => supabase!.from('contact_research_runs').select('*').order('created_at', { ascending: false }).abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('targeted_research_jobs', signal => supabase!.from('targeted_research_jobs').select('*').order('created_at', { ascending: false }).limit(100).abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('agent_research_jobs', signal => supabase!.from('agent_research_jobs').select('*').order('created_at', { ascending: false }).limit(100).abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('agent_research_submissions', signal => supabase!.from('agent_research_submissions').select('id,agent_job_id,validation_status,submitted_at,processed_at').order('submitted_at', { ascending: false }).limit(100).abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('molecule_intelligence_sections', signal => supabase!.from('molecule_intelligence_sections').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('research_claims', signal => supabase!.from('research_claims').select('id,entity_id,claim_type,claim_text,source_url,source_class,attribution,provenance,confidence,created_at').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('research_entities', signal => supabase!.from('research_entities').select('id,entity_type,canonical_name,metadata_json').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+  ])
+  const loadDiagnostics = { degraded: diagnostics.length > 0, codes: diagnostics }
   const intelTables = {sources: sources.data ?? [], positions: positions.data ?? [], education: education.data ?? [], works: works.data ?? [], problems: problems.data ?? [], themes: themes.data ?? [], jtbd: jtbd.data ?? [], claims: claims.data ?? [], notes: notes.data ?? [], history: history.data ?? [], conflicts: conflicts.data ?? [], researchRuns: researchRuns.data ?? []}
   const contactEvidenceById = new Map<string, any[]>()
   ;(contactEvidence.data ?? []).forEach((e: any) => { const items = contactEvidenceById.get(e.contact_id) ?? []; if (!items.some((x: any) => x.source_url === e.source_url && x.evidence_type === e.evidence_type)) items.push(e); contactEvidenceById.set(e.contact_id, items) })
@@ -79,5 +121,5 @@ export async function loadSupabaseData() {
   ;(researchEntities.data || []).filter((entity: any) => entity.entity_type === 'MOLECULE').forEach((entity: any) => { const moleculeId = entity.metadata_json?.molecule_id; if (moleculeId) moleculeEntityIds.set(entity.id, moleculeId) })
   const moleculeClaims = Object.fromEntries((researchClaims.data || []).reduce((map: Map<string, any[]>, claim: any) => { const moleculeId = moleculeEntityIds.get(claim.entity_id); if (!moleculeId) return map; const rows = map.get(moleculeId) || []; rows.push(claim); map.set(moleculeId, rows); return map }, new Map<string, any[]>()))
   const opportunityMetrics = summarizeOpportunityMetrics(allOpportunities.data ?? [])
-  return { leads, canonicalContacts, moleculeIntelligence, moleculeClaims, researchClaims: researchClaims.data || [], candidates: [], pipeline: { crawler: latestRun || null, contactResearch: researchRuns.data?.[0] || null, targetedResearch: latestTargeted || null, workExport, workIngestion }, metrics: { opportunities_total: opportunityMetrics.total, qualified_ge_50: opportunityMetrics.qualified, hot: opportunityMetrics.hot, high: opportunityMetrics.high, review: opportunityMetrics.review, crawler: latestRun, companies_count: companies.data?.length ?? 0, molecules_count: molecules.data?.length ?? 0, signals_count: signals.data?.length ?? 0, canonical_contacts: canonicalContacts.length, opportunity_contact_links: opportunityContacts.data?.length ?? 0 } }
+  return { leads, canonicalContacts, moleculeIntelligence, moleculeClaims, researchClaims: researchClaims.data || [], candidates: [], pipeline: { crawler: latestRun || null, contactResearch: researchRuns.data?.[0] || null, targetedResearch: latestTargeted || null, workExport, workIngestion }, loadDiagnostics, metrics: { opportunities_total: opportunityMetrics.total, qualified_ge_50: opportunityMetrics.qualified, hot: opportunityMetrics.hot, high: opportunityMetrics.high, review: opportunityMetrics.review, crawler: latestRun, companies_count: companies.data?.length ?? 0, molecules_count: molecules.data?.length ?? 0, signals_count: signals.data?.length ?? 0, canonical_contacts: canonicalContacts.length, opportunity_contact_links: opportunityContacts.data?.length ?? 0 } }
 }
