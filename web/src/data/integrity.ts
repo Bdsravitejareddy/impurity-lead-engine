@@ -26,6 +26,7 @@ export function buildCanonicalContacts(
   // those repeated IDs while retaining every child relationship/evidence item.
   const byId = new Map<string, any>()
   contacts.forEach((contact, index) => {
+    if (contact.merged_into_contact_id) return
     const key = contact.id ? String(contact.id) : `__missing_id_${index}`
     const existing = byId.get(key)
     if (!existing) {

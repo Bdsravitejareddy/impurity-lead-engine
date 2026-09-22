@@ -501,7 +501,13 @@ def apply_validated_agent_research(client: Any, *, job: dict[str, Any], validate
         metrics["sources_accepted"] += 1
     contacts = []
     try:
-        contacts = client.table("contacts").select("*").eq("company_id", company_id).execute().data or [] if company_id else []
+        if company_id:
+            contact_query = client.table("contacts").select("*").eq("company_id", company_id)
+            if hasattr(contact_query, "is_"):
+                contact_query = contact_query.is_("merged_into_contact_id", "null")
+            contacts = contact_query.execute().data or []
+        else:
+            contacts = []
     except Exception:
         contacts = []
     for person in data.get("people") or []:

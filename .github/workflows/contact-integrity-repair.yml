@@ -1,0 +1,38 @@
+name: contact integrity audit and repair
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "audit is read-only; apply performs only reversible soft merges and source backfills"
+        required: true
+        default: audit
+        type: choice
+        options: [audit, apply]
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install .
+      - name: Audit or apply contact integrity repair
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python scripts/repair_contact_integrity.py --mode "${{ inputs.mode }}" | tee contact-integrity-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contact-integrity-report
+          path: contact-integrity-report.json
+          if-no-files-found: ignore
+          retention-days: 14

@@ -134,7 +134,10 @@ class SupabaseLeadStore:
         if not hasattr(table, "select"):
             return None
         try:
-            rows = table.select("id,normalized_name,display_name,title,department,profile_url,primary_email").eq("company_id", company_id).execute().data or []
+            query = table.select("id,normalized_name,display_name,title,department,profile_url,primary_email,merged_into_contact_id").eq("company_id", company_id)
+            if hasattr(query, "is_"):
+                query = query.is_("merged_into_contact_id", "null")
+            rows = query.execute().data or []
         except Exception:
             return None
         best: tuple[float, dict] | None = None
