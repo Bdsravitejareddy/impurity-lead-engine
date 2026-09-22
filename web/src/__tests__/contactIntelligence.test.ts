@@ -21,6 +21,15 @@ describe('contact intelligence normalization', () => {
     expect(researchCompleteness(intel, {profile_url: null, email: null, phone: null})).toMatchObject({score: 0, state: 'UNRESEARCHED'})
     expect(personSummary(intel, {name: 'Keisuke Inoue', title: 'Quality'}, 'Takeda')).toContain('Not enough verified evidence')
   })
+  it('uses accepted canonical contact evidence as a source fallback when source rows are temporarily unavailable', () => {
+    const intel = normalizeContactIntelligence('c1', {
+      sources: [], positions: [], education: [], works: [], problems: [], themes: [], jtbd: [], claims: [], notes: [], history: [], conflicts: [], researchRuns: [],
+      evidence: [{ contact_id: 'c1', source_url: 'https://example.test/publication', source_type: 'PUBLICATION', observed_at: '2026-09-20', evidence_text: 'Author listed.' }],
+    })
+    expect(intel.sources).toEqual([expect.objectContaining({
+      url: 'https://example.test/publication', source_type: 'PUBLICATION', status: 'USED',
+    })])
+  })
   it('recognizes a deep profile from category coverage rather than row count', () => {
     const intel = normalizeContactIntelligence('v', {sources: [{contact_id:'v',url:'a',status:'USED',source_type:'Professional profile'},{contact_id:'v',url:'b',status:'USED',source_type:'Official company'}], positions: [{contact_id:'v',title:'Global Head'} ,{contact_id:'v',title:'VP'}], education: [{contact_id:'v',degree:'MSc'}], works: [{contact_id:'v',attribution:'PERSON_DIRECT'},{contact_id:'v',attribution:'COMPANY_CONTEXT'}], problems: [{contact_id:'v',problem:'Quality'}], themes: [{contact_id:'v',theme:'Quality'}], jtbd: [{contact_id:'v',statement:'Investigate impurities'}], claims: [{contact_id:'v',provenance:'OBSERVED',claim_text:'Current'}], notes: [], history: [], conflicts: [], researchRuns: [{contact_id:'v',status:'COMPLETED'}]})
     expect(researchCompleteness(intel, {profile_url:'p', email:null, phone:null})).toMatchObject({state: 'DEEP PROFILE'})

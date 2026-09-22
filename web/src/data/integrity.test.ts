@@ -38,6 +38,34 @@ describe('canonical contact read model', () => {
     expect(rows[0].evidence_urls).toHaveLength(2)
   })
 
+  it('keeps one canonical person while listing every explicitly linked molecule', () => {
+    const [row] = buildCanonicalContacts(
+      [{ id: 'c1', display_name: 'Jitendra Singh', company_id: 'co1', intelligence: { works: [{ attribution: 'PERSON_DIRECT', molecules: ['Historical molecule'] }] } }],
+      [
+        { contact_id: 'c1', opportunity_id: 'o1' },
+        { contact_id: 'c1', opportunity_id: 'o2' },
+        { contact_id: 'c1', opportunity_id: 'o2' },
+      ],
+      [],
+      new Map([['co1', 'Acme']]),
+      [
+        { id: 'o1', company_id: 'co1', molecule_id: 'm1', molecule_name: 'Molecule A' },
+        { id: 'o2', company_id: 'co1', molecule_id: 'm2', molecule_name: 'Molecule B' },
+      ],
+    )
+
+    expect(row.id).toBe('c1')
+    expect(row.linked_opportunities).toBe(2)
+    expect(row.related_molecules).toEqual([
+      expect.objectContaining({ molecule_id: 'm1', molecule_name: 'Molecule A' }),
+      expect.objectContaining({ molecule_id: 'm2', molecule_name: 'Molecule B' }),
+    ])
+    expect(row.molecule_history).toEqual(expect.arrayContaining([
+      expect.objectContaining({ molecule_name: 'Molecule A', provenance: 'EXPLICIT_OPPORTUNITY_LINK' }),
+      expect.objectContaining({ molecule_name: 'Historical molecule', provenance: 'PERSON_DIRECT_WORK' }),
+    ]))
+  })
+
   it('does not count rejected source rows or use identity as a quality fallback', () => {
     const [row] = buildCanonicalContacts([{ id: 'c1', display_name: 'A', company_id: 'co1', contact_confidence: 0.94 }], [], [
       { contact_id: 'c1', url: 'https://example.test/accepted', status: 'USED' },

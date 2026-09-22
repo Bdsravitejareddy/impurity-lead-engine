@@ -3,7 +3,26 @@ export type ContactSource = { id?: string; url: string; title?: string; publishe
 export type ContactIntelligence = { sources: ContactSource[]; positions: any[]; education: any[]; works: any[]; problems: any[]; themes: any[]; jtbd: any[]; claims: any[]; notes: any[]; history: any[]; conflicts: any[]; researchRuns: any[] }
 export const emptyIntelligence = (): ContactIntelligence => ({sources:[],positions:[],education:[],works:[],problems:[],themes:[],jtbd:[],claims:[],notes:[],history:[],conflicts:[],researchRuns:[]})
 export function dedupeSources(rows: any[] = []): ContactSource[] { const seen = new Map<string, any>(); for (const row of rows) { const key = String(row.url || '').trim().toLowerCase(); if (key && !seen.has(key)) seen.set(key, row) } return [...seen.values()] }
-export function normalizeContactIntelligence(contactId: string, tables: Record<string, any[]>): ContactIntelligence { return { sources: dedupeSources(tables.sources?.filter(x => x.contact_id === contactId) ?? []), positions: tables.positions?.filter(x => x.contact_id === contactId) ?? [], education: tables.education?.filter(x => x.contact_id === contactId) ?? [], works: tables.works?.filter(x => x.contact_id === contactId) ?? [], problems: tables.problems?.filter(x => x.contact_id === contactId) ?? [], themes: tables.themes?.filter(x => x.contact_id === contactId) ?? [], jtbd: tables.jtbd?.filter(x => x.contact_id === contactId) ?? [], claims: tables.claims?.filter(x => x.contact_id === contactId) ?? [], notes: tables.notes?.filter(x => x.contact_id === contactId) ?? [], history: tables.history?.filter(x => x.contact_id === contactId) ?? [], conflicts: tables.conflicts?.filter(x => x.contact_id === contactId) ?? [], researchRuns: tables.researchRuns?.filter(x => x.contact_id === contactId) ?? [] } }
+export function normalizeContactIntelligence(contactId: string, tables: Record<string, any[]>): ContactIntelligence {
+  const sourceRows = tables.sources?.filter(x => x.contact_id === contactId) ?? []
+  // contact_evidence is already canonical, accepted production evidence. It
+  // remains a provenance-preserving fallback if the richer source workspace
+  // read is temporarily unavailable; it never manufactures a claim.
+  const evidenceSources = (tables.evidence?.filter(x => x.contact_id === contactId) ?? [])
+    .filter((row: any) => Boolean(row.source_url))
+    .map((row: any) => ({
+      id: `contact-evidence:${row.contact_id}:${row.source_url}`,
+      url: row.source_url,
+      title: row.evidence_type ? `${row.evidence_type} evidence` : 'Accepted contact evidence',
+      source_type: row.source_type || 'OTHER_PUBLIC',
+      source_date: row.observed_at || null,
+      status: 'USED' as SourceState,
+      evidence_strength: 'CANONICAL_CONTACT_EVIDENCE',
+      why_used: 'Accepted canonical contact evidence',
+      source_kind: 'CONTACT_EVIDENCE',
+    }))
+  return { sources: dedupeSources([...sourceRows, ...evidenceSources]), positions: tables.positions?.filter(x => x.contact_id === contactId) ?? [], education: tables.education?.filter(x => x.contact_id === contactId) ?? [], works: tables.works?.filter(x => x.contact_id === contactId) ?? [], problems: tables.problems?.filter(x => x.contact_id === contactId) ?? [], themes: tables.themes?.filter(x => x.contact_id === contactId) ?? [], jtbd: tables.jtbd?.filter(x => x.contact_id === contactId) ?? [], claims: tables.claims?.filter(x => x.contact_id === contactId) ?? [], notes: tables.notes?.filter(x => x.contact_id === contactId) ?? [], history: tables.history?.filter(x => x.contact_id === contactId) ?? [], conflicts: tables.conflicts?.filter(x => x.contact_id === contactId) ?? [], researchRuns: tables.researchRuns?.filter(x => x.contact_id === contactId) ?? [] }
+}
 export function sourceCoverage(sources: ContactSource[]) { const classes = new Set(sources.map(s => s.source_type)); return { inspected: sources.length, used: sources.filter(s => s.status === 'USED').length, rejected: sources.filter(s => s.status === 'REJECTED').length, blocked: sources.filter(s => s.status === 'BLOCKED_AUTH').length, pending: sources.filter(s => s.status === 'PENDING_REVIEW').length, classes: classes.size, byType: [...classes].map(type => ({type, inspected: sources.filter(s => s.source_type === type).length, used: sources.filter(s => s.source_type === type && s.status === 'USED').length, rejected: sources.filter(s => s.source_type === type && s.status === 'REJECTED').length})) } }
 export type ProfilePosition = {title:string; company_name?:string; department?:string; start_date?:string; end_date?:string; location?:string; description?:string; employment_type?:string; attribution:'PERSON_DIRECT'; confidence:number; review_suggested?:boolean}
 export type ProfileEducation = {institution:string; degree?:string; field?:string; start_date?:string; end_date?:string; description?:string; confidence:number; review_suggested?:boolean}

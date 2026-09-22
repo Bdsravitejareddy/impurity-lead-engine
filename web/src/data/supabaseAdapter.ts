@@ -5,8 +5,12 @@ import { DEFAULT_QUERY_TIMEOUT_MS, loadWithTimeout } from './loadGuard'
 
 export const CORE_QUERY_TIMEOUT_MS = DEFAULT_QUERY_TIMEOUT_MS
 export const SECONDARY_QUERY_TIMEOUT_MS = 3_000
+// Contact 360 is a first-class production read model. Keep its source,
+// claim, and work reads bounded, but give their small projected payloads a
+// realistic chance to arrive before reporting a degraded evidence state.
+export const CONTACT_INTELLIGENCE_QUERY_TIMEOUT_MS = 8_000
 
-type QueryResponse = { data: any[] | null; error: any | null }
+type QueryResponse = { data: any[] | null; error: any | null; degraded?: boolean }
 type QueryBuilder = (signal: AbortSignal) => PromiseLike<QueryResponse>
 
 function recordQueryFailure(name: string, diagnostics: string[]) {
@@ -29,7 +33,7 @@ async function runOptionalQuery(name: string, query: QueryBuilder, diagnostics: 
     // Secondary intelligence is allowed to degrade to an empty read model. The
     // diagnostic remains available to the caller and the console without
     // fabricating any evidence.
-    return { data: [], error: null }
+    return { data: [], error: null, degraded: true }
   }
 }
 
@@ -37,12 +41,13 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
   if (!supabase) throw new Error('supabase_not_configured')
   const timeoutMs = options.queryTimeoutMs ?? CORE_QUERY_TIMEOUT_MS
   const secondaryTimeoutMs = Math.min(timeoutMs, SECONDARY_QUERY_TIMEOUT_MS)
+  const contactIntelligenceTimeoutMs = Math.min(timeoutMs, CONTACT_INTELLIGENCE_QUERY_TIMEOUT_MS)
   const diagnostics: string[] = []
   // These reads are required to render the live opportunity/contact model.
   // Every request receives an AbortSignal and has a hard deadline.
   const [opportunities, allOpportunities, signals, contacts, companies, molecules] = await Promise.all([
     runCoreQuery('opportunities', signal => supabase!.from('opportunities').select('*, companies(*), molecules(*)').gte('score', 50).neq('status', 'dismissed').order('score', { ascending: false }).abortSignal(signal), diagnostics, timeoutMs),
-    runCoreQuery('all_opportunities', signal => supabase!.from('opportunities').select('id,status,score,priority').abortSignal(signal), diagnostics, timeoutMs),
+    runCoreQuery('all_opportunities', signal => supabase!.from('opportunities').select('id,status,score,priority,company_id,molecule_id,molecules(canonical_name)').abortSignal(signal), diagnostics, timeoutMs),
     runCoreQuery('signals', signal => supabase!.from('signals').select('id,company_id,molecule_id,source_type,signal_type,source_url,source_record_id,evidence_text,event_date,confidence,base_weight,fingerprint').order('event_date', { ascending: false }).abortSignal(signal), diagnostics, timeoutMs),
     runCoreQuery('contacts', signal => supabase!.from('contacts').select('id,company_id,display_name,title,department,profile_url,primary_email,email_status,primary_phone,phone_status,role_fit_score,contact_confidence,technical_relevance,quality_diagnostics,last_verified_at').abortSignal(signal), diagnostics, timeoutMs),
     runCoreQuery('companies', signal => supabase!.from('companies').select('id,legal_name,normalized_name').abortSignal(signal), diagnostics, timeoutMs),
@@ -54,16 +59,16 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
   // unusable; its named failure remains visible in loadDiagnostics.
   const [opportunityContacts, contactEvidence, runs, sources, positions, education, works, problems, themes, jtbd, claims, notes, history, conflicts, researchRuns, targetedJobs, agentJobs, agentSubmissions, moleculeSections, researchClaims, researchEntities] = await Promise.all([
     runOptionalQuery('opportunity_contacts', signal => supabase!.from('opportunity_contacts').select('opportunity_id,contact_id,role_fit_score,rank,rationale').abortSignal(signal), diagnostics, secondaryTimeoutMs),
-    runOptionalQuery('contact_evidence', signal => supabase!.from('contact_evidence').select('contact_id,source_url,evidence_type,observed_at,evidence_text,source_type,metadata_json').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_evidence', signal => supabase!.from('contact_evidence').select('contact_id,source_url,evidence_type,observed_at,evidence_text,source_type,metadata_json').abortSignal(signal), diagnostics, contactIntelligenceTimeoutMs),
     runOptionalQuery('crawl_runs', signal => supabase!.from('crawl_runs').select('id,started_at,completed_at,source_adapter,status,records_seen,records_inserted,errors,duration_seconds,metrics_json').order('started_at', { ascending: false }).limit(10).abortSignal(signal), diagnostics, secondaryTimeoutMs),
-    runOptionalQuery('contact_sources', signal => supabase!.from('contact_sources').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
-    runOptionalQuery('contact_positions', signal => supabase!.from('contact_positions').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_sources', signal => supabase!.from('contact_sources').select('id,contact_id,url,title,publisher,source_type,source_date,accessed_at,status,evidence_strength,why_used,why_not_used,rejection_reason,source_kind,processing_status,extraction_json').abortSignal(signal), diagnostics, contactIntelligenceTimeoutMs),
+    runOptionalQuery('contact_positions', signal => supabase!.from('contact_positions').select('id,contact_id,title,company_name,department,start_date,end_date,attribution,confidence,source_ids').abortSignal(signal), diagnostics, contactIntelligenceTimeoutMs),
     runOptionalQuery('contact_education', signal => supabase!.from('contact_education').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
-    runOptionalQuery('contact_works', signal => supabase!.from('contact_works').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_works', signal => supabase!.from('contact_works').select('id,contact_id,work_type,title,work_date,person_role,company_context,topic,molecules,technical_themes,problem_addressed,methods,contribution,attribution,confidence,source_ids').abortSignal(signal), diagnostics, contactIntelligenceTimeoutMs),
     runOptionalQuery('contact_problems', signal => supabase!.from('contact_problems').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
     runOptionalQuery('contact_themes', signal => supabase!.from('contact_themes').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
     runOptionalQuery('contact_jtbd', signal => supabase!.from('contact_jtbd').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
-    runOptionalQuery('contact_claims', signal => supabase!.from('contact_claims').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
+    runOptionalQuery('contact_claims', signal => supabase!.from('contact_claims').select('id,contact_id,claim_type,claim_text,provenance,confidence,source_ids,opportunity_id,created_at').abortSignal(signal), diagnostics, contactIntelligenceTimeoutMs),
     runOptionalQuery('contact_notes', signal => supabase!.from('contact_notes').select('*').abortSignal(signal), diagnostics, secondaryTimeoutMs),
     runOptionalQuery('contact_history', signal => supabase!.from('contact_history').select('*').order('changed_at', { ascending: false }).abortSignal(signal), diagnostics, secondaryTimeoutMs),
     runOptionalQuery('contact_conflicts', signal => supabase!.from('contact_conflicts').select('*').eq('status','OPEN').abortSignal(signal), diagnostics, secondaryTimeoutMs),
@@ -76,7 +81,7 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
     runOptionalQuery('research_entities', signal => supabase!.from('research_entities').select('id,entity_type,canonical_name,metadata_json').abortSignal(signal), diagnostics, secondaryTimeoutMs),
   ])
   const loadDiagnostics = { degraded: diagnostics.length > 0, codes: diagnostics }
-  const intelTables = {sources: sources.data ?? [], positions: positions.data ?? [], education: education.data ?? [], works: works.data ?? [], problems: problems.data ?? [], themes: themes.data ?? [], jtbd: jtbd.data ?? [], claims: claims.data ?? [], notes: notes.data ?? [], history: history.data ?? [], conflicts: conflicts.data ?? [], researchRuns: researchRuns.data ?? []}
+  const intelTables = {sources: sources.data ?? [], evidence: contactEvidence.data ?? [], positions: positions.data ?? [], education: education.data ?? [], works: works.data ?? [], problems: problems.data ?? [], themes: themes.data ?? [], jtbd: jtbd.data ?? [], claims: claims.data ?? [], notes: notes.data ?? [], history: history.data ?? [], conflicts: conflicts.data ?? [], researchRuns: researchRuns.data ?? []}
   const contactEvidenceById = new Map<string, any[]>()
   ;(contactEvidence.data ?? []).forEach((e: any) => { const items = contactEvidenceById.get(e.contact_id) ?? []; if (!items.some((x: any) => x.source_url === e.source_url && x.evidence_type === e.evidence_type)) items.push(e); contactEvidenceById.set(e.contact_id, items) })
   const linksByOpportunity = new Map<string, any[]>()
@@ -88,7 +93,7 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
     const list = contactByCompany.get(c.company_id) ?? []
     const evidence = contactEvidenceById.get(c.id) ?? []
     const metadata = evidence.map((e: any) => e.metadata_json || {}).reduce((acc: any, item: any) => ({ ...acc, ...item }), {})
-    list.push({ id: c.id, company_id: c.company_id, display_name: c.display_name, name: c.display_name, title: c.title, function: c.department, profile_url: c.profile_url, email: c.primary_email, email_status: c.email_status, mailbox_verified: c.email_status === 'VERIFIED_PUBLIC', phone: c.primary_phone, phone_status: c.phone_status, role_fit_score: c.role_fit_score, confidence: Number(c.contact_confidence ?? 0), contact_confidence: c.contact_confidence, identity_confidence: c.contact_confidence, technical_relevance: c.technical_relevance, quality: c.quality_diagnostics?.score ?? null, quality_diagnostics: c.quality_diagnostics, current_role_confidence: readCurrentRoleConfidence(c), last_verified_at: c.last_verified_at, current_status: metadata.current_status || (evidence.some((e: any) => ['company_site','company_profile','professional_profile','conference','company_press','company_pdf','association','registry'].includes(e.source_type)) ? 'PROFESSIONAL_PROFILE' : 'UNKNOWN'), evidence_urls: evidence.map((e: any) => e.source_url).filter(Boolean), evidence, professional_themes: metadata.professional_themes || [], jtbd: metadata.jtbd || metadata.inferred_jtbd || [], why: metadata.why || metadata.observed_context, recommended_channel: metadata.recommended_channel, intelligence: normalizeContactIntelligence(c.id, intelTables) })
+    list.push({ id: c.id, company_id: c.company_id, display_name: c.display_name, name: c.display_name, title: c.title, function: c.department, profile_url: c.profile_url, email: c.primary_email, email_status: c.email_status, mailbox_verified: c.email_status === 'VERIFIED_PUBLIC', phone: c.primary_phone, phone_status: c.phone_status, role_fit_score: c.role_fit_score, confidence: Number(c.contact_confidence ?? 0), contact_confidence: c.contact_confidence, identity_confidence: c.contact_confidence, technical_relevance: c.technical_relevance, quality: c.quality_diagnostics?.score ?? null, quality_diagnostics: c.quality_diagnostics, current_role_confidence: readCurrentRoleConfidence(c), last_verified_at: c.last_verified_at, current_status: metadata.current_status || (evidence.some((e: any) => ['company_site','company_profile','professional_profile','conference','company_press','company_pdf','association','registry'].includes(e.source_type)) ? 'PROFESSIONAL_PROFILE' : 'UNKNOWN'), evidence_urls: evidence.map((e: any) => e.source_url).filter(Boolean), evidence, professional_themes: metadata.professional_themes || [], jtbd: metadata.jtbd || metadata.inferred_jtbd || [], why: metadata.why || metadata.observed_context, recommended_channel: metadata.recommended_channel, intelligence_availability: { sources: !sources.degraded, claims: !claims.degraded, works: !works.degraded }, intelligence: normalizeContactIntelligence(c.id, intelTables) })
     contactByCompany.set(c.company_id, list)
   })
   const signalByPair = new Map<string, any[]>()
@@ -112,7 +117,12 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
     return { id: o.id, account: { company: company.legal_name || company.normalized_name, company_id: o.company_id, domain: company.domain, country: company.country, buyer_type: company.company_type || 'pharmaceutical manufacturer/developer' }, opportunity: { molecule: molecule.canonical_name, molecule_id: o.molecule_id, company_id: o.company_id, regulatory_application: pair.find((s: any) => s.source_record_id)?.source_record_id, score: o.score, priority: o.priority, technical_relevance: o.rationale, urgency_bonus: 0 }, evidence: groupedEvidence, moleculeIntelligence: sections, contacts: primaryContacts, other_company_contacts: otherCompanyContacts, person_intelligence: { observed: Array.from(new Set(intelligence.observed)), inferred: Array.from(new Set(intelligence.inferred)), unknown: intelligence.unknown.length ? Array.from(new Set(intelligence.unknown)) : (primaryContacts.length ? [] : ['No validated person intelligence is available for this opportunity yet.']) }, outreach: { personalization_hook: o.rationale, discovery_question: 'Are there current or upcoming analytical requirements where an external partner could help?' } }
   })
   const latestRun = runs.data?.[0]
-  const canonicalContacts = buildCanonicalContacts(Array.from(contactByCompany.values()).flat(), opportunityContacts.data ?? [], sources.data ?? [], companyNames)
+  const canonicalOpportunityDetails = (allOpportunities.data ?? []).map((opportunity: any) => ({ ...opportunity, molecule_name: opportunity.molecules?.canonical_name }))
+  const canonicalSources = [
+    ...(sources.data ?? []),
+    ...(contactEvidence.data ?? []).filter((row: any) => row.source_url).map((row: any) => ({ contact_id: row.contact_id, url: row.source_url, source_url: row.source_url, status: 'USED' })),
+  ]
+  const canonicalContacts = buildCanonicalContacts(Array.from(contactByCompany.values()).flat(), opportunityContacts.data ?? [], canonicalSources, companyNames, canonicalOpportunityDetails)
   const latestTargeted = targetedJobs.data?.[0]
   const workExport = summarizeWorkState(agentJobs.data ?? [], agentSubmissions.data ?? [])
   const workIngestion = summarizeWorkState(agentJobs.data ?? [], agentSubmissions.data ?? [])

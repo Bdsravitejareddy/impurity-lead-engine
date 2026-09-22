@@ -3,9 +3,14 @@ export function buildCanonicalContacts(
   opportunityLinks: any[],
   sources: any[],
   companyNames: Map<string, string>,
+  opportunities: any[] = [],
 ) {
   const opps = new Map<string, Set<string>>()
   const sourceKeys = new Map<string, Set<string>>()
+  const opportunityById = new Map<string, any>()
+  opportunities.forEach(opportunity => {
+    if (opportunity?.id) opportunityById.set(String(opportunity.id), opportunity)
+  })
   opportunityLinks.forEach(link => { if (!link.contact_id) return; const set = opps.get(link.contact_id) || new Set<string>(); if (link.opportunity_id) set.add(link.opportunity_id); opps.set(link.contact_id, set) })
   sources.forEach(source => {
     if (!source.contact_id) return
@@ -39,17 +44,52 @@ export function buildCanonicalContacts(
     for (const [field, value] of Object.entries(contact)) if ((merged[field] == null || merged[field] === '') && value != null && value !== '') merged[field] = value
     byId.set(key, merged)
   })
-  return Array.from(byId.values()).map(contact => ({
-    ...contact,
-    id: contact.id,
-    company: companyNames.get(contact.company_id) || 'Unknown company',
-    linked_opportunities: opps.get(contact.id)?.size || 0,
-    sources: sourceKeys.get(contact.id)?.size || 0,
-    quality: contact.contact_quality_score ?? contact.quality_diagnostics?.score ?? null,
-    current_role_confidence: readCurrentRoleConfidence(contact),
-    contactability: contact.email_status || contact.phone_status || (contact.profile_url ? 'PROFESSIONAL' : 'UNKNOWN'),
-    last_verified: contact.last_verified_at || null,
-  }))
+  return Array.from(byId.values()).map(contact => {
+    const linkedOpportunityIds = Array.from(opps.get(contact.id) || [])
+    const related_molecules = linkedOpportunityIds
+      .map(opportunityId => opportunityById.get(opportunityId))
+      .filter(Boolean)
+      .map(opportunity => ({
+        opportunity_id: opportunity.id,
+        molecule_id: opportunity.molecule_id,
+        molecule_name: opportunity.molecule_name || opportunity.molecule?.canonical_name || 'Molecule not established',
+        company_id: opportunity.company_id,
+        score: opportunity.score,
+        priority: opportunity.priority,
+      }))
+      .filter((item, index, all) => all.findIndex(candidate => candidate.opportunity_id === item.opportunity_id) === index)
+      .sort((a, b) => String(a.molecule_name).localeCompare(String(b.molecule_name)))
+    const moleculeHistory = new Map<string, any>()
+    related_molecules.forEach(item => {
+      const key = String(item.molecule_name).trim().toLowerCase()
+      if (key) moleculeHistory.set(key, { molecule_name: item.molecule_name, provenance: 'EXPLICIT_OPPORTUNITY_LINK', opportunity_ids: [item.opportunity_id] })
+    })
+    ;(contact.intelligence?.works || [])
+      .filter((work: any) => work.attribution === 'PERSON_DIRECT')
+      .flatMap((work: any) => Array.isArray(work.molecules) ? work.molecules : [])
+      .filter(Boolean)
+      .forEach((molecule: any) => {
+        const molecule_name = String(molecule).trim()
+        const key = molecule_name.toLowerCase()
+        if (!key) return
+        const existing = moleculeHistory.get(key)
+        moleculeHistory.set(key, existing ? { ...existing, provenance: `${existing.provenance}|PERSON_DIRECT_WORK` } : { molecule_name, provenance: 'PERSON_DIRECT_WORK', opportunity_ids: [] })
+      })
+
+    return {
+      ...contact,
+      id: contact.id,
+      company: companyNames.get(contact.company_id) || 'Unknown company',
+      linked_opportunities: linkedOpportunityIds.length,
+      related_molecules,
+      molecule_history: Array.from(moleculeHistory.values()).sort((a, b) => String(a.molecule_name).localeCompare(String(b.molecule_name))),
+      sources: sourceKeys.get(contact.id)?.size || 0,
+      quality: contact.contact_quality_score ?? contact.quality_diagnostics?.score ?? null,
+      current_role_confidence: readCurrentRoleConfidence(contact),
+      contactability: contact.email_status || contact.phone_status || (contact.profile_url ? 'PROFESSIONAL' : 'UNKNOWN'),
+      last_verified: contact.last_verified_at || null,
+    }
+  })
 }
 
 export function readCurrentRoleConfidence(contact: any) {
