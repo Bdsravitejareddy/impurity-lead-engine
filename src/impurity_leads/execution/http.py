@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from impurity_leads.execution.retry import TaskFailure
+from impurity_leads.zero_cost import ProviderUsage, provider_for_url
 
 
 @dataclass
@@ -58,10 +59,11 @@ class HostGate:
 class CrawlClient:
     """Own no retries: return HTTP statuses and propagate transport errors intact."""
 
-    def __init__(self, context, settings, gate, client=None):
+    def __init__(self, context, settings, gate, client=None, usage: ProviderUsage | None = None):
         self.context = context
         self.settings = settings
         self.gate = gate
+        self.usage = usage
         self._owned = client is None
         self._timeout = httpx.Timeout(settings.request_timeout_seconds,
                                       connect=settings.connect_timeout_seconds,
@@ -82,6 +84,8 @@ class CrawlClient:
             self.client.close()
 
     def get(self, url, params=None, headers=None) -> httpx.Response:
+        if self.usage is not None:
+            self.usage.record(provider_for_url(str(url)), requests=1)
         request = self.client.build_request("GET", url, params=params, headers=headers, timeout=self._timeout)
         history = []
         while True:

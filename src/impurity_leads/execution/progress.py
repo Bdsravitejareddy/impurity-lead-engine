@@ -68,6 +68,17 @@ def summarize(run: dict, tasks: list[dict], now: datetime | None = None) -> dict
         "last_activity": max(activity).isoformat(),
         "elapsed_seconds": max(0, (ended - started).total_seconds()),
     }
+    provider_usage = (run.get("metrics_json") or {}).get("provider_usage")
+    if isinstance(provider_usage, list):
+        result["provider_usage"] = [
+            {
+                "provider": str(row.get("provider") or "unknown")[:80],
+                "requests": int(row.get("requests") or 0),
+                "jobs": int(row.get("jobs") or 0),
+                "estimated_paid_requests": int(row.get("estimated_paid_requests") or 0),
+            }
+            for row in provider_usage if isinstance(row, dict)
+        ]
     samples = [task["duration_seconds"] for task in tasks
                if task.get("status") in TERMINAL and _number(task.get("duration_seconds"))]
     if not provisional and len(samples) >= 3:
@@ -101,6 +112,16 @@ def _safe_event(event):
                 result["domain"] = domain.lower()
         except ValueError:
             pass
+    if isinstance(event.get("provider_usage"), list):
+        result["provider_usage"] = [
+            {
+                "provider": str(row.get("provider") or "unknown")[:80],
+                "requests": max(0, int(row.get("requests") or 0)),
+                "jobs": max(0, int(row.get("jobs") or 0)),
+                "estimated_paid_requests": max(0, int(row.get("estimated_paid_requests") or 0)),
+            }
+            for row in event["provider_usage"] if isinstance(row, dict)
+        ]
     if event.get("error") is not None:
         value = event["error"]
         result["error"] = value if isinstance(value, str) and value in ERRORS else "unknown_error"

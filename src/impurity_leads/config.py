@@ -24,6 +24,9 @@ class Settings(BaseModel):
     max_response_bytes: int = Field(default=8 * 1024 * 1024, gt=0)
     supabase_url: str | None = None
     supabase_secret_key: str | None = Field(default=None, repr=False)
+    # Production defaults to the no-paid-provider safety boundary. Explicitly
+    # set ZERO_COST_MODE=false only for an approved non-production experiment.
+    zero_cost_mode: bool = True
     openai_api_key: str | None = Field(default=None, repr=False)
     ai_analysis_enabled: bool = False
     ai_max_calls_per_research_run: int = Field(default=3, ge=0, le=20)
@@ -60,7 +63,7 @@ class Settings(BaseModel):
 def load_settings() -> Settings:
     values = {}
     for name in Settings.model_fields:
-        env_name = name.upper() if name.startswith(('supabase_', 'openai_', 'ai_', 'daily_', 'min_', 'max_')) else 'CRAWLER_' + name.upper()
+        env_name = name.upper() if name.startswith(('supabase_', 'openai_', 'ai_', 'daily_', 'min_', 'max_', 'zero_cost_')) else 'CRAWLER_' + name.upper()
         value = os.getenv(env_name)
         if value:
             values[name] = value

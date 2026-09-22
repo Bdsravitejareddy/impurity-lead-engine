@@ -17,17 +17,19 @@ from impurity_leads.execution.http import CrawlClient, HostGate
 from impurity_leads.execution.retry import TaskFailure, classify_error, DatabaseUnavailable, InterruptedTask
 from impurity_leads.models import Opportunity
 from impurity_leads.seeds import relevant_candidate_urls
+from impurity_leads.zero_cost import ProviderUsage
 
 
 class CrawlHandlers:
-    def __init__(self, settings, *, client_factory=None, reporter=None, opportunities=None):
+    def __init__(self, settings, *, client_factory=None, reporter=None, opportunities=None, provider_usage: ProviderUsage | None = None):
         self.opportunities=opportunities or []
         self.settings=settings
         self.gate=HostGate(settings.per_domain_delay_seconds)
         self.client_factory=client_factory
         self.reporter=reporter
+        self.provider_usage=provider_usage
     def client(self,ctx):
-        return nullcontext(self.client_factory(ctx)) if self.client_factory else CrawlClient(ctx,self.settings,self.gate)
+        return nullcontext(self.client_factory(ctx)) if self.client_factory else CrawlClient(ctx,self.settings,self.gate,usage=self.provider_usage)
     def structured(self,ctx):
         from impurity_leads.cli import _structured_headers
         if ctx.checkpoint.get('fetched'):

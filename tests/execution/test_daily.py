@@ -30,6 +30,8 @@ def test_daily_graph_persists_and_exports_without_repeating_completed_tasks(tmp_
     scoring=next(t for t in store.tasks() if t['stage']=='processing_scoring')
     assert scoring['result_json']['signals']
     assert scoring['result_json']['opportunities']
+    assert store.run['metrics_json']['zero_cost_mode'] is True
+    assert all(row['estimated_paid_requests'] == 0 for row in store.run['metrics_json']['provider_usage'])
     count=len(store.published)
     assert count>0 and list(tmp_path.glob('*.csv'))
     def forbidden(ctx):raise AssertionError('completed network task repeated')

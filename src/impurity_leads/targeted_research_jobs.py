@@ -8,6 +8,7 @@ from uuid import NAMESPACE_URL, uuid5
 from impurity_leads.contact_quality import QualityConfig
 from impurity_leads.research_adapters import classify_source
 from impurity_leads.research_discovery import DiscoveryProvider, EuropePmcProvider
+from impurity_leads.zero_cost import ProviderUsage
 from impurity_leads.targeted_research import OpportunityCoverage, evaluate_opportunity_coverage, targeted_query_plan
 from impurity_leads.person_discovery import affiliation_matches_company, candidate_identity_state, extract_authors, rank_candidate
 from impurity_leads.contacts.normalize import normalize_person_name
@@ -175,7 +176,7 @@ def process_targeted_job(client: Any, job: dict[str, Any], opportunity: dict[str
     return result
 
 
-def run_pending_targeted_jobs(settings: Any, *, limit: int = 10, provider: DiscoveryProvider | None = None) -> dict[str, Any]:
+def run_pending_targeted_jobs(settings: Any, *, limit: int = 10, provider: DiscoveryProvider | None = None, provider_usage: ProviderUsage | None = None) -> dict[str, Any]:
     """Consume queued opportunity jobs with the existing backend secret path."""
     if not getattr(settings, "supabase_url", None) or not getattr(settings, "supabase_secret_key", None):
         return {"status": "SKIPPED", "reason": "supabase_credentials_missing", "processed": 0}
@@ -230,6 +231,8 @@ def run_pending_targeted_jobs(settings: Any, *, limit: int = 10, provider: Disco
             if molecule_rows: opportunity["molecule_name"] = molecule_rows[0].get("canonical_name")
         contacts = client.table("contacts").select("*").execute().data or []
         metrics = process_targeted_job(client, job, opportunity, contacts, provider)
+        if provider_usage is not None:
+            provider_usage.record(getattr(provider, "name", "public_research"), requests=1, jobs=1)
         result["processed"] += 1
         result["sources"] += metrics.get("sources", 0)
         result["claims"] += metrics.get("claims", 0)

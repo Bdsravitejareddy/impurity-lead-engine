@@ -11,6 +11,7 @@ import re
 import subprocess
 from datetime import datetime, timezone
 from typing import Any
+from impurity_leads.zero_cost import ProviderUsage
 
 AGENT_JOB_START = "<!-- SVAK_AGENT_JOB_START -->"
 AGENT_JOB_END = "<!-- SVAK_AGENT_JOB_END -->"
@@ -132,7 +133,7 @@ def select_ready_agent_jobs(rows: list[dict[str, Any]], *, limit: int = 5, conta
     return selected
 
 
-def export_ready_agent_jobs(client: Any, *, repo: str, limit: int = 5) -> dict[str, Any]:
+def export_ready_agent_jobs(client: Any, *, repo: str, limit: int = 5, provider_usage: ProviderUsage | None = None) -> dict[str, Any]:
     """Export READY jobs once. GitHub failures remain observable and retryable."""
     def ready_query():
         # supabase-py request builders mutate their query parameters. Build a
@@ -168,4 +169,6 @@ def export_ready_agent_jobs(client: Any, *, repo: str, limit: int = 5) -> dict[s
             exported.append({"job_id": job["id"], "issue_number": number, "url": url})
         except Exception as exc:
             errors.append({"job_id": job.get("id"), "error": type(exc).__name__})
+    if provider_usage is not None:
+        provider_usage.record("chatgpt_work", jobs=len(exported))
     return {"status": "COMPLETED" if not errors else "PARTIAL", "exported": exported, "errors": errors}

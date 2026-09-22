@@ -9,11 +9,15 @@ from __future__ import annotations
 import json
 from urllib.request import Request, urlopen
 from typing import Any
+from impurity_leads.zero_cost import ProviderUsage, assert_paid_provider_allowed
 
 
-def analyze_json(settings, *, instructions: str, document: str, schema: dict[str, Any], model: str = "gpt-4o-mini") -> dict[str, Any] | None:
+def analyze_json(settings, *, instructions: str, document: str, schema: dict[str, Any], model: str = "gpt-4o-mini", usage: ProviderUsage | None = None) -> dict[str, Any] | None:
     if not getattr(settings, "ai_analysis_enabled", False) or not getattr(settings, "openai_api_key", None):
         return None
+    assert_paid_provider_allowed("openai", settings, usage)
+    if usage is not None:
+        usage.record("openai", requests=1, estimated_paid_requests=1)
     bounded = document[: int(getattr(settings, "ai_max_input_chars_per_document", 20000))]
     payload = {
         "model": model,

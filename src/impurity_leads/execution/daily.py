@@ -23,6 +23,7 @@ from impurity_leads.seeds import load_company_seeds
 from impurity_leads.storage.memory import MemoryLeadStore
 from impurity_leads.storage.supabase_store import SupabaseLeadStore
 from impurity_leads.storage.task_store import create_task_store
+from impurity_leads.zero_cost import ProviderUsage
 
 
 class RowCollector:
@@ -88,8 +89,9 @@ def write_exports(directory,run_id,opportunities,contacts):
 
 def execute_run(store,settings,seeds,output_dir,*,workers=6,reporter=None,client_factory=None,stop=None):
     started=time.monotonic()
+    provider_usage = ProviderUsage()
     runner=Runner(store,settings,workers,stop=stop,reporter=reporter)
-    handlers=CrawlHandlers(settings,client_factory=client_factory,reporter=reporter)
+    handlers=CrawlHandlers(settings,client_factory=client_factory,reporter=reporter,provider_usage=provider_usage)
     grouped=defaultdict(list)
     for seed in seeds:grouped[seed.domain].append(asdict(seed))
     initial=[task('source:clinical_trials',STAGES[0],identifier='clinical_trials'),task('source:fda',STAGES[0],identifier='fda')]
@@ -104,7 +106,7 @@ def execute_run(store,settings,seeds,output_dir,*,workers=6,reporter=None,client
         stage_start=time.monotonic()
         complete=runner.run_stage(name,handler)
         timings[name]=timings.get(name,0)+time.monotonic()-stage_start
-        metrics.update(stage_seconds=timings,active_elapsed_seconds=base_elapsed+time.monotonic()-started)
+        metrics.update(stage_seconds=timings,active_elapsed_seconds=base_elapsed+time.monotonic()-started,provider_usage=provider_usage.rows(),zero_cost_mode=bool(settings.zero_cost_mode))
         if not complete:
             store.finish('paused',name,metrics)
         return complete
@@ -180,6 +182,7 @@ def execute_run(store,settings,seeds,output_dir,*,workers=6,reporter=None,client
         skip_count=sum(t['status']=='skipped' for t in rows),failure_count=sum(t['status']=='permanent_failed' for t in rows),
         retries=sum(max(0,t['attempt_count']-1) for t in rows))
     store.finish('completed_with_errors' if metrics['failure_count'] else 'completed',STAGES[5],metrics)
+    if reporter:reporter.emit({'event':'provider_usage','provider_usage':provider_usage.rows()})
     if reporter:reporter.render(store.run,rows)
     return 0
 

@@ -16,6 +16,7 @@ from urllib.request import Request, urlopen
 from impurity_leads.contacts.normalize import normalize_person_name
 from impurity_leads.research_graph import publication_graph_entities
 from impurity_leads.contact_quality import QualityConfig, portfolio_quality
+from impurity_leads.zero_cost import ProviderUsage
 
 EUROPE_PMC = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 TECHNICAL_TERMS = ("analytical", "quality", "impurity", "degradation", "stability", "method", "regulatory", "cmc", "api", "validation")
@@ -335,7 +336,7 @@ def _portfolio_snapshot(client: Any, settings: Any) -> dict[str, Any]:
         return {"gate_passed": False, "ai_mode": "TARGETED_SEARCH", "reason_for_ai_escalation": "quality snapshot unavailable"}
 
 
-def run_pending_contact_research(settings, *, limit: int = 10, fetcher: Callable[[str], dict[str, Any]] = _get_json) -> dict[str, Any]:
+def run_pending_contact_research(settings, *, limit: int = 10, fetcher: Callable[[str], dict[str, Any]] = _get_json, provider_usage: ProviderUsage | None = None) -> dict[str, Any]:
     """Process queued contact research runs using the backend-only Supabase key."""
     if not settings.supabase_url or not settings.supabase_secret_key:
         return {"status": "SKIPPED", "reason": "supabase_credentials_missing", "processed": 0}
@@ -352,6 +353,8 @@ def run_pending_contact_research(settings, *, limit: int = 10, fetcher: Callable
             client.table("contact_research_runs").update({"status": "FAILED", "completed_at": datetime.now(timezone.utc).isoformat(), "error": "contact_not_found", "error_code": "CONTACT_NOT_FOUND"}).eq("id", run_id).execute()
             continue
         contact = contact_rows[0]
+        if provider_usage is not None:
+            provider_usage.record("europe_pmc", jobs=1)
         client.table("contact_research_runs").update({"status": "RUNNING", "started_at": datetime.now(timezone.utc).isoformat()}).eq("id", run_id).execute()
         supplied = client.table("contact_sources").select("*").eq("contact_id", contact["id"]).execute().data or []
         queries = _queries(contact, supplied)
@@ -360,6 +363,8 @@ def run_pending_contact_research(settings, *, limit: int = 10, fetcher: Callable
         try:
             for query in queries:
                 endpoint = f"{EUROPE_PMC}?query={quote(query)}&format=json&pageSize=5"
+                if provider_usage is not None:
+                    provider_usage.record("europe_pmc", requests=1)
                 try:
                     payload = fetcher(endpoint)
                 except Exception as exc:
