@@ -26,6 +26,12 @@ CHILD_TABLES = (
     "contact_research_runs", "opportunity_contacts",
 )
 
+CHILD_COLUMNS = {
+    "contact_evidence": "id,contact_id,source_url,fingerprint",
+    "contact_sources": "id,contact_id,url",
+    "opportunity_contacts": "opportunity_id,contact_id",
+}
+
 
 def _client():
     from supabase import create_client
@@ -106,7 +112,7 @@ def _update_children(client, duplicate_id: str, survivor_id: str) -> dict[str, i
     metrics: dict[str, int] = {}
     for table in CHILD_TABLES:
         try:
-            rows = _rows(client, table, "id,contact_id,url,fingerprint")
+            rows = _rows(client, table, CHILD_COLUMNS.get(table, "id,contact_id"))
             duplicate_rows = [row for row in rows if str(row.get("contact_id")) == duplicate_id]
             if not duplicate_rows:
                 continue
@@ -117,7 +123,15 @@ def _update_children(client, duplicate_id: str, survivor_id: str) -> dict[str, i
             for row in duplicate_rows:
                 conflict = (row.get("url") and str(row.get("url")) in survivor_urls) or (row.get("fingerprint") and str(row.get("fingerprint")) in survivor_fingerprints)
                 try:
-                    if conflict and row.get("id"):
+                    if table == "opportunity_contacts":
+                        existing = any(str(item.get("opportunity_id")) == str(row.get("opportunity_id")) and str(item.get("contact_id")) == survivor_id for item in rows)
+                        query = client.table(table).delete().eq("opportunity_id", row["opportunity_id"]).eq("contact_id", duplicate_id) if existing else client.table(table).update({"contact_id": survivor_id}).eq("opportunity_id", row["opportunity_id"]).eq("contact_id", duplicate_id)
+                        query.execute()
+                        if existing:
+                            removed += 1
+                        else:
+                            moved += 1
+                    elif conflict and row.get("id"):
                         client.table(table).delete().eq("id", row["id"]).execute()
                         removed += 1
                     else:
@@ -157,6 +171,17 @@ def apply(client, report: dict) -> dict:
         except Exception:
             pass
         merged.append({**candidate, "child_metrics": child_metrics})
+
+    # A retry after a successful soft merge must still finish moving child
+    # relations. This makes the repair idempotent if a previous run merged the
+    # parent rows before a table-level child update failed.
+    for row in _rows(client, "contacts", "id,merged_into_contact_id,display_name"):
+        survivor_id = row.get("merged_into_contact_id")
+        if not survivor_id:
+            continue
+        child_metrics = _update_children(client, str(row["id"]), str(survivor_id))
+        if child_metrics:
+            merged.append({"duplicate_id": row["id"], "survivor_id": survivor_id, "display_name": row.get("display_name"), "reason": "retry_child_migration", "child_metrics": child_metrics})
 
     backfilled = []
     for item in report["accepted_evidence_source_backfills"]:
