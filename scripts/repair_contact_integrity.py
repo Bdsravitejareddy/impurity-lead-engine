@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from impurity_leads.contact_integrity import classify_contact_pair, choose_survivor
+from impurity_leads.contacts.normalize import normalize_person_name
 
 
 CHILD_TABLES = (
@@ -53,7 +54,11 @@ def audit(client) -> dict:
     active = [row for row in contacts if not row.get("merged_into_contact_id")]
     groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for row in active:
-        key = (str(row.get("company_id") or ""), str(row.get("normalized_name") or "").strip().casefold())
+        # Recompute from the display name as well as the stored key. Legacy
+        # imports are precisely where the stored normalized value may include
+        # degree suffixes or punctuation.
+        normalized = normalize_person_name(str(row.get("display_name") or row.get("normalized_name") or ""))
+        key = (str(row.get("company_id") or ""), normalized)
         if key[0] and key[1]:
             groups[key].append(row)
     decisions = []
