@@ -40,7 +40,10 @@ const sectionAliases: Record<string, string> = {
 }
 const profileHeadings = Object.keys(sectionAliases)
 const uiNoise = /^(home|my network|messaging|notifications|jobs|contact info|see more|show all|linkedin|follow|connect|send message|subscribe|followers?|connections?|people also viewed|interests?)$/i
-const dateRange = /^(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+)?(?:19|20)\d{2}\s*(?:[-–—]|to)\s*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+)?(?:(?:19|20)\d{2}|present|current)(?:\s*:\s*.*)?$/i
+// LinkedIn exports append tenure after the date range, e.g.
+// "May 2008 - Present · 18 yrs 5 mos". Keep the date portion and ignore the
+// trailing tenure when building canonical career positions.
+const dateRange = /^(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+)?(?:19|20)\d{2}\s*(?:[-–—]|to)\s*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+)?(?:(?:19|20)\d{2}|present|current)(?:\s*(?:·|\||•)\s*.*)?(?:\s*:\s*.*)?$/i
 const durationLine = /^\d+\s+(?:yr|yrs|year|years|mo|mos|month|months)/i
 const cleanLine = (line: string) => line.replace(/\u00a0/g, ' ').replace(/[\t ]+/g, ' ').trim()
 const usefulLines = (text: string) => text.split(/\r?\n/).map(cleanLine).filter(Boolean)
@@ -68,7 +71,7 @@ export function isSuspiciousExtractedField(value: string): boolean {
 function confidenceFor(value: string, explicit = true) { return isSuspiciousExtractedField(value) ? 0.25 : explicit ? 0.95 : 0.75 }
 function parseDateRange(value: string): { start_date?: string; end_date?: string } { const match = value.match(/((?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+)?(?:19|20)\d{2})\s*(?:[-–—]|to)\s*((?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+)?(?:19|20)\d{2}|present|current)/i); return match ? {start_date: match[1], end_date: /^present|current$/i.test(match[2]) ? '' : match[2]} : {} }
 function isDateLine(line: string) { return dateRange.test(line) }
-function isLikelyCompany(line: string) { return /\b(pharma(?:ceuticals?)?|laborator(?:y|ies)|therapeutics?|biotech|inc\.?|ltd\.?|limited|corporation|corp\.?|holdings?|university|institute|hospital|group|cipla|takeda|novartis|bayer|lupin)\b/i.test(line) }
+function isLikelyCompany(line: string) { return /\b(pharma(?:ceuticals?)?|laborator(?:y|ies)|therapeutics?|biotech|inc\.?|ltd\.?|limited|corporation|corp\.?|holdings?|university|institute|hospital|group|cipla|takeda|novartis|bayer|lupin|ipca|indoco|elder)\b/i.test(line) }
 function isLikelyDegree(line: string) { return /\b(?:M\.?\s*(?:Sc|Pharm|Tech|Eng|BA|BS|MBA)|B\.?\s*(?:Pharm|Tech|Sc|Eng|BA|BS)|Ph\.?\s*D|Bachelor|Master|Doctor|Diploma|Certificate|Post[- ]?graduate|Fellowship)\b/i.test(line) }
 function sectionLines(sections: Record<string,string[]>, key: string) { return (sections[key] || []).filter(line => !uiNoise.test(line) && line.length > 1) }
 
@@ -76,7 +79,7 @@ function parseExperience(lines: string[]): ProfilePosition[] {
   const positions: ProfilePosition[] = []; let lastDateIndex = -1; let currentCompany = ''
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]; if (!isDateLine(line)) continue
-    const range = parseDateRange(line); const trailing = line.match(/:\s*(.+)$/)?.[1]?.trim() || ''; const before = lines.slice(lastDateIndex + 1, i).filter(x => !durationLine.test(x) && !isDateLine(x))
+    const range = parseDateRange(line); const trailing = line.match(/:\s*(.+)$/)?.[1]?.trim() || ''; const before = lines.slice(lastDateIndex + 1, i).filter(x => !durationLine.test(x) && !isDateLine(x) && !/^(?:full[- ]?time|part[- ]?time|contract|internship|freelance)$/i.test(x) && !/\blogo$/i.test(x))
     const inline = before.find(x => /\s+at\s+/i.test(x)); let title = ''; let company = currentCompany; let location = ''
     if (trailing) { const atMatch = trailing.match(/^(.+?)\s+at\s+(.+)$/i); title = (atMatch ? atMatch[1] : trailing).trim(); company = (atMatch ? atMatch[2] : '').trim(); const priorCompany = before.find(isLikelyCompany); if (priorCompany) company = priorCompany }
     else if (inline) { const parts = inline.split(/\s+at\s+/i); title = parts[0].trim(); company = parts.slice(1).join(' at ').trim() }

@@ -70,6 +70,38 @@ describe('contact intelligence normalization', () => {
     expect(profile.works.some(work => work.work_type === 'PATENT')).toBe(true)
     expect(profile.skills).toEqual(expect.arrayContaining(['Analytical Development', 'CMC']))
   })
+  it('parses LinkedIn tenure suffixes and nested employer roles without misassigning the company', () => {
+    const profile = extractProfessionalProfile(`
+      Dr. Amit Gosar
+      Experience
+      Indoco Remedies Ltd
+      18 yrs 5 mos
+      Head - Indoco Analytical Solutions
+      Full-time
+      May 2008 - Present · 18 yrs 5 mos
+      Navi Mumbai, Maharashtra, India
+      Project Management, Business Development and +5 skills
+      Head Analytical research and development (API)
+      May 2008 - Present · 18 yrs 5 mos
+      Analytical method development, analytical method validations, impurity profile and characterization.
+      Sr. Manager ADL
+      Elder pharmaceuticals Ltd.
+      Jan 2007 - May 2008 · 1 yr 5 mos
+      Analytical method development, method validation, impurity profiling, polymorphism
+      IPCA logo
+      Asst. Manager
+      IPCA
+      2000 – 2006
+      Education
+      MEDIAMITRA-Digital Marketing Course Training Institute
+      Master's degree, Digital Marketing
+    `, 'Dr. Amit Gosar')
+    expect(profile.positions.length).toBe(4)
+    expect(profile.positions[0]).toMatchObject({title: 'Head - Indoco Analytical Solutions', company_name: 'Indoco Remedies Ltd', end_date: ''})
+    expect(profile.positions[1]).toMatchObject({title: 'Head Analytical research and development (API)', company_name: 'Indoco Remedies Ltd', end_date: ''})
+    expect(profile.positions[2]).toMatchObject({title: 'Sr. Manager ADL', company_name: 'Elder pharmaceuticals Ltd.'})
+    expect(profile.positions[3]).toMatchObject({title: 'Asst. Manager', company_name: 'IPCA'})
+  })
   it('flags corrupted extracted education text without deleting the source value', () => {
     expect(isSuspiciousExtractedField('be UCS $ / >> P')).toBe(true)
     expect(isSuspiciousExtractedField('MSc Chemistry')).toBe(false)
