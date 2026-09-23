@@ -3,7 +3,7 @@ export type ContactSource = { id?: string; url: string; title?: string; publishe
 export type ContactIntelligence = { sources: ContactSource[]; positions: any[]; education: any[]; works: any[]; problems: any[]; themes: any[]; jtbd: any[]; persona: any[]; claims: any[]; notes: any[]; history: any[]; conflicts: any[]; researchRuns: any[] }
 // Bump when extraction or derived profile persistence changes so re-pasting an
 // unchanged source still repairs rows written by an older parser.
-export const PROFILE_PARSER_VERSION = '3'
+export const PROFILE_PARSER_VERSION = '4'
 
 const roleJtbdTemplates: Record<string, string[]> = {
   analytical: [
