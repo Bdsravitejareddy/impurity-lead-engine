@@ -60,9 +60,15 @@ export default function ProfileImportDialog({ contactName, onClose, onSave }: Pr
   const addWork = (type = 'PROJECT') => update({ works: [...profile.works, { title: '', work_type: type, topic: '', work_date: '', url: '', attribution: 'PERSON_DIRECT', confidence: 0.7 }] })
   const removeAt = <T,>(items: T[], index: number) => items.filter((_, i) => i !== index)
   const submit = async (research: boolean) => {
-    if (!profile.currentTitle && !profile.currentCompany && !profile.about && !profile.positions.length && !profile.education.length && !profile.works.length) { setError('Add profile text or at least one structured professional field.'); return }
+    // Users commonly paste text and save directly without pressing Parse profile.
+    // Parse that pending text before validating so raw input is never mistaken for
+    // an empty structured profile.
+    const hasStructuredProfile = Boolean(profile.currentTitle || profile.currentCompany || profile.about || profile.positions.length || profile.education.length || profile.works.length)
+    const submittedProfile = hasStructuredProfile || !raw.trim() ? profile : extractProfessionalProfile(raw, fullName || contactName)
+    if (!submittedProfile.currentTitle && !submittedProfile.currentCompany && !submittedProfile.about && !submittedProfile.positions.length && !submittedProfile.education.length && !submittedProfile.works.length) { setError('Add profile text or at least one structured professional field.'); return }
+    if (submittedProfile !== profile) setProfile(submittedProfile)
     setParsing(true); setError('')
-    try { await onSave({ name: fullName || contactName, raw, url, kind: 'PROFESSIONAL_PROFILE', filename, profile, research }) } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save profile.') } finally { setParsing(false) }
+    try { await onSave({ name: fullName || contactName, raw, url, kind: 'PROFESSIONAL_PROFILE', filename, profile: submittedProfile, research }) } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save profile.') } finally { setParsing(false) }
   }
   const summary = useMemo(() => `${profile.positions.length} positions · ${profile.education.length} education records · ${profile.works.length} works · ${(profile.certifications || []).length} certifications`, [profile])
 
