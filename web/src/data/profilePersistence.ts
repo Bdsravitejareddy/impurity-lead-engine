@@ -8,23 +8,14 @@ export type ProfileRows = {
   themes: any[]
 }
 
-function hashText(value: string): string {
-  let hash = 2166136261
-  for (let i = 0; i < value.length; i++) {
-    hash ^= value.charCodeAt(i)
-    hash = Math.imul(hash, 16777619)
-  }
-  return (hash >>> 0).toString(16)
-}
-
 /** Builds the stable source identity used for manually supplied profiles. */
-export function profileSourceKey(contactId: string, url: string | undefined, raw: string | undefined, now = Date.now()): string {
-  const hash = raw ? hashText(raw) : null
-  return (url || '').trim() || ('manual://' + contactId + '/' + (hash || now))
+export function profileSourceKey(contactId: string, url: string | undefined, _raw?: string, _now = Date.now()): string {
+  return (url || '').trim() || ('manual://' + contactId + '/profile')
 }
 
 export function normalizeProfileRows(profile: ProfileExtraction, contactId: string, sourceId: string, safeDate: (value: unknown) => string | null): ProfileRows {
   const claims = [...(profile.claims || [])]
+  for (const recommendation of profile.recommendations || []) claims.push(`Recommendation from ${recommendation.name}: ${recommendation.text}`)
   if (profile.headline) claims.push(`Professional headline: ${profile.headline}`)
   if (profile.about) claims.push(`Professional summary: ${profile.about}`)
   if (profile.currentTitle) claims.push(`Current title: ${profile.currentTitle}`)

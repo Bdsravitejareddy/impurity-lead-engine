@@ -152,6 +152,46 @@ describe('contact intelligence normalization', () => {
     expect(problems[0]).toMatchObject({attribution: 'FUNCTIONAL', confidence: 0.6, source_ids: ['source-1']})
     expect(problems[0].problem).toMatch(/analytical|impurit/i)
   })
+  it('parses heading-light LinkedIn text without mixing education into career and captures recommendations', () => {
+    const profile = extractProfessionalProfile(`
+      Experienced Head with a demonstrated history in pharmaceuticals. Skilled in method development, HPLC and validation.
+      Indoco Remedies Ltd logo
+      Indoco Remedies Ltd
+      18 yrs 5 mos
+      Head - Indoco Analytical Solutions
+      May 2008 - Present · 18 yrs 5 mos
+      Navi Mumbai, Maharashtra, India · On-site
+      Head Analytical research and development (API)
+      May 2008 - Present · 18 yrs 5 mos
+      Analytical method development and impurity characterization.
+      Sr. Manager ADL
+      Elder pharmaceuticals Ltd.
+      Jan 2007 - May 2008 · 1 yr 5 mos
+      IPCA logo
+      Asst. Manager
+      IPCA
+      2000 – 2006
+      MEDIAMITRA-Digital Marketing Course Training Institute logo
+      Master's degree, Digital Marketing
+      Oct 2023 – Jun 2024
+      MBA, XMBA
+      2010 – 2012
+      Chicago University
+      D. Sc., Chemistry
+      2005 – 2006
+      Recommendations
+      Mayank M.
+      · 3rd
+      Strategic Business Leader | Life Sciences
+      May 26, 2026, Dr. Amit Gosar was Mayank’s client
+      A true subject matter expert with scientific excellence and humility.
+    `, 'Dr. Amit Gosar')
+    expect(profile.positions.map(position => position.title)).toEqual(expect.arrayContaining(['Head - Indoco Analytical Solutions', 'Head Analytical research and development (API)', 'Sr. Manager ADL', 'Asst. Manager']))
+    expect(profile.positions.every(position => !/degree|chemistry|mba|digital/i.test(position.title))).toBe(true)
+    expect(profile.education.some(item => /MBA/i.test(item.degree || '') && /Chicago/i.test(item.institution))).toBe(true)
+    expect(profile.recommendations?.[0]).toMatchObject({name: 'Mayank M.'})
+    expect(researchQueries(profile, 'Dr. Amit Gosar')).toContain('Mayank M. Indoco Remedies Ltd professional profile')
+  })
   it('flags corrupted extracted education text without deleting the source value', () => {
     expect(isSuspiciousExtractedField('be UCS $ / >> P')).toBe(true)
     expect(isSuspiciousExtractedField('MSc Chemistry')).toBe(false)
@@ -170,9 +210,9 @@ describe('contact intelligence normalization', () => {
   })
   it('executes source-key generation after hashing supplied profile content', () => {
     const key = profileSourceKey('contact-1', '', 'Vijayasarathi Ramaswami profile', 123)
-    expect(key).toMatch(/^manual:\/\/contact-1\/[0-9a-f]+$/)
+    expect(key).toBe('manual://contact-1/profile')
     expect(profileSourceKey('contact-1', 'https://example.com/profile', 'profile', 123)).toBe('https://example.com/profile')
-    expect(profileSourceKey('contact-1', '  ', '', 123)).toBe('manual://contact-1/123')
+    expect(profileSourceKey('contact-1', '  ', '', 123)).toBe('manual://contact-1/profile')
   })
   it('structures a messy full-profile export without turning navigation text into work', () => {
     const profile = extractProfessionalProfile(`

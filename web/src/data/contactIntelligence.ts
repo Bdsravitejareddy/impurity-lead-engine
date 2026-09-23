@@ -3,7 +3,7 @@ export type ContactSource = { id?: string; url: string; title?: string; publishe
 export type ContactIntelligence = { sources: ContactSource[]; positions: any[]; education: any[]; works: any[]; problems: any[]; themes: any[]; jtbd: any[]; persona: any[]; claims: any[]; notes: any[]; history: any[]; conflicts: any[]; researchRuns: any[] }
 // Bump when extraction or derived profile persistence changes so re-pasting an
 // unchanged source still repairs rows written by an older parser.
-export const PROFILE_PARSER_VERSION = '5'
+export const PROFILE_PARSER_VERSION = '6'
 
 const roleJtbdTemplates: Record<string, string[]> = {
   analytical: [
@@ -130,7 +130,8 @@ export type ProfileEducation = {institution:string; degree?:string; field?:strin
 export type ProfileWork = {title:string; work_type:string; work_date?:string; topic?:string; url?:string; authors?:string; publisher?:string; description?:string; attribution:'PERSON_DIRECT'; confidence:number; review_suggested?:boolean}
 export type PdfFailureClass = 'IMAGE_ONLY_PDF'|'TEXT_PRESENT_BUT_RECONSTRUCTION_FAILED'|'CORRUPT_OR_UNSUPPORTED_PDF'
 export type PdfTextExtraction = { text: string; pages: number; warnings: string[]; failureClass?: PdfFailureClass; metrics?: { itemCounts: number[]; characterCounts: number[]; averageItemLengths: number[]; fragmentedPages: number[] } }
-export type ProfileExtraction = { claims: string[]; currentTitle?: string; headline?: string; currentCompany?: string; location?: string; about?: string; skills?: string[]; certifications?: {name:string; issuer?:string; issue_date?:string; expiry_date?:string; credential_url?:string; confidence:number; review_suggested?:boolean}[]; activities?: ProfileWork[]; positions: ProfilePosition[]; education: ProfileEducation[]; themes: string[]; keywords: string[]; works: ProfileWork[]; warnings?: string[]; pages?: number; parser_version?: string }
+export type ProfileRecommendation = { name: string; relationship?: string; date?: string; text: string }
+export type ProfileExtraction = { claims: string[]; currentTitle?: string; headline?: string; currentCompany?: string; location?: string; about?: string; skills?: string[]; certifications?: {name:string; issuer?:string; issue_date?:string; expiry_date?:string; credential_url?:string; confidence:number; review_suggested?:boolean}[]; activities?: ProfileWork[]; recommendations?: ProfileRecommendation[]; positions: ProfilePosition[]; education: ProfileEducation[]; themes: string[]; keywords: string[]; works: ProfileWork[]; warnings?: string[]; pages?: number; parser_version?: string }
 
 const sectionAliases: Record<string, string> = {
   'about':'ABOUT','experience':'EXPERIENCE','work experience':'EXPERIENCE','education':'EDUCATION',
@@ -150,7 +151,7 @@ const profileFooter = /^(?:accessibility|talent solutions|community guidelines|c
 const noisySkill = /(?:endorsement|endorsed by|logo$|show all|\b(?:all|industry knowledge|tools & technologies|interpersonal skills)\b|community guidelines|privacy & terms|linkedin corporation|\b\d+\+?\s+endorsements?\b)/i
 const cleanLine = (line: string) => line.replace(/\u00a0/g, ' ').replace(/[\t ]+/g, ' ').trim()
 const usefulLines = (text: string) => text.split(/\r?\n/).map(cleanLine).filter(Boolean)
-const canonicalHeading = (line: string) => sectionAliases[line.toLowerCase().replace(/\s+/g, ' ').trim()]
+const canonicalHeading = (line: string) => { const normalized = line.toLowerCase().replace(/\s+/g, ' ').trim(); return sectionAliases[normalized] || sectionAliases[normalized.split(':')[0].trim()] }
 
 function splitProfileSections(text: string): { sections: Record<string,string[]>; preamble: string[] } {
   const sections: Record<string,string[]> = { PROFILE: [] }; let current = 'PROFILE'
@@ -174,7 +175,7 @@ export function isSuspiciousExtractedField(value: string): boolean {
 function confidenceFor(value: string, explicit = true) { return isSuspiciousExtractedField(value) ? 0.25 : explicit ? 0.95 : 0.75 }
 function parseDateRange(value: string): { start_date?: string; end_date?: string } { const match = value.match(/((?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+)?(?:19|20)\d{2})\s*(?:[-–—]|to)\s*((?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+)?(?:19|20)\d{2}|present|current)/i); return match ? {start_date: match[1], end_date: /^present|current$/i.test(match[2]) ? '' : match[2]} : {} }
 function isDateLine(line: string) { return dateRange.test(line) }
-function isLikelyCompany(line: string) { return /\b(pharma(?:ceuticals?)?|laborator(?:y|ies)|therapeutics?|biotech|inc\.?|ltd\.?|limited|corporation|corp\.?|holdings?|university|institute|hospital|group|cipla|takeda|novartis|bayer|lupin|ipca|indoco|elder)\b/i.test(line) }
+function isLikelyCompany(line: string) { return line.length <= 120 && !/[.!?]{2,}/.test(line) && !/\b(?:demonstrated history|skilled in|experienced head|professional summary|recommendation)\b/i.test(line) && /\b(pharma(?:ceuticals?)?|laborator(?:y|ies)|therapeutics?|biotech|inc\.?|ltd\.?|limited|corporation|corp\.?|holdings?|university|institute|hospital|group|cipla|takeda|novartis|bayer|lupin|ipca|indoco|elder)\b/i.test(line) }
 function isLikelyDegree(line: string) { return /\b(?:M\.?\s*(?:Sc|Pharm|Tech|Eng|BA|BS|MBA)|B\.?\s*(?:Pharm|Tech|Sc|Eng|BA|BS)|Ph\.?\s*D|Bachelor|Master|Doctor|Diploma|Certificate|Post[- ]?graduate|Fellowship)\b/i.test(line) }
 function sectionLines(sections: Record<string,string[]>, key: string) { return (sections[key] || []).filter(line => !uiNoise.test(line) && !profileFooter.test(line) && line.length > 1) }
 function cleanAbout(value: string | undefined): string | undefined {
@@ -213,55 +214,89 @@ function parseExperience(lines: string[]): ProfilePosition[] {
 }
 
 function parseEducation(lines: string[]): ProfileEducation[] {
-  const records: ProfileEducation[] = []; let pending: Partial<ProfileEducation> = {}
-  const flush = () => { if (!pending.institution && !pending.degree) return; const institution = String(pending.institution || 'Institution not specified').trim(); const degree = pending.degree?.trim(); const value = degree || institution; const review_suggested = isSuspiciousExtractedField(value) || isSuspiciousExtractedField(institution); records.push({institution, degree, field: pending.field, start_date: pending.start_date, end_date: pending.end_date, description: pending.description, confidence: review_suggested ? 0.25 : Number(pending.confidence || 0.85), review_suggested}); pending = {} }
-  for (const line of lines) {
-    if (isDateLine(line)) { Object.assign(pending, parseDateRange(line)); continue }
-    const direct = line.match(/^(.+?)\s+(?:from|at)\s+(.+)$/i)
-    if (direct && isLikelyDegree(direct[1])) { flush(); pending = {degree: direct[1].trim(), institution: direct[2].trim(), confidence: 0.9}; continue }
-    if (isLikelyDegree(line)) { if (pending.degree) flush(); pending.degree = line; pending.confidence = 0.9; continue }
-    if (!pending.institution && /\b(?:university|college|institute|school|academy)\b/i.test(line)) { pending.institution = line; continue }
-    if (pending.degree && !pending.field && line.length < 100 && !/^(?:activities|description|coursework)$/i.test(line)) { pending.field = line; continue }
-    if (pending.institution && line.length > 20) pending.description = [pending.description, line].filter(Boolean).join(' ')
+  const records: ProfileEducation[] = []
+  const degreeIndexes = lines.map((line, index) => ({line, index})).filter(item => isLikelyDegree(item.line))
+  const institutionLike = (line: string) => /\b(?:university|college|institute|school|academy)\b/i.test(line) || /\b(?:v\.j\.t\.i|sies|mediamitra|ruparel|royal college)\b/i.test(line)
+  for (let d = 0; d < degreeIndexes.length; d++) {
+    const {line: degreeLine, index} = degreeIndexes[d]
+    const nextDegree = degreeIndexes[d + 1]?.index ?? lines.length
+    const previousDegree = degreeIndexes[d - 1]?.index ?? -1
+    const direct = degreeLine.match(/^(.+?)\s+(?:from|at)\s+(.+)$/i)
+    let degree = direct ? direct[1].trim() : degreeLine.trim()
+    let institution = direct ? direct[2].trim() : ''
+    let field: string | undefined
+    let range: {start_date?: string; end_date?: string} = {}
+    if (!institution) {
+      const before = lines.slice(previousDegree + 1, index).filter(candidate => !isDateLine(candidate) && !profileFooter.test(candidate) && !durationLine.test(candidate))
+      const after = lines.slice(index + 1, nextDegree).filter(candidate => !isDateLine(candidate) && !profileFooter.test(candidate) && !durationLine.test(candidate))
+      institution = [...before].reverse().find(institutionLike) || after.find(institutionLike) || before.at(-1) || 'Institution not specified'
+      const possibleField = after.find(candidate => candidate.length < 100 && !institutionLike(candidate) && !uiNoise.test(candidate) && !isLikelyDegree(candidate))
+      if (possibleField && !/^(?:activities|description|coursework)$/i.test(possibleField)) field = possibleField
+    }
+    const dateLine = lines.slice(index, nextDegree).find(isDateLine) || lines.slice(previousDegree + 1, index).reverse().find(isDateLine)
+    if (dateLine) range = parseDateRange(dateLine)
+    const review_suggested = isSuspiciousExtractedField(degree) || isSuspiciousExtractedField(institution)
+    records.push({institution, degree, field, ...range, confidence: review_suggested ? 0.25 : 0.9, review_suggested})
   }
-  flush(); return records.filter(x => x.institution !== 'Institution not specified' || x.degree).slice(0, 20)
+  return records.slice(0, 20)
 }
 
 function parseWorkSection(lines: string[], type: string): ProfileWork[] { return lines.filter(x => x.length > 2 && !uiNoise.test(x)).slice(0, 30).map(title => ({title, work_type:type, attribution:'PERSON_DIRECT', confidence: confidenceFor(title, false)})) }
+function parseRecommendations(lines: string[]): ProfileRecommendation[] {
+  const results: ProfileRecommendation[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const name = lines[i]
+    if (!name || name.length > 100 || !lines[i + 1]?.match(/^(?:·\s*)?(?:1st|2nd|3rd|degree)/i)) continue
+    const end = lines.findIndex((line, index) => index > i + 1 && line.length <= 100 && lines[index + 1]?.match(/^(?:·\s*)?(?:1st|2nd|3rd|degree)/i))
+    const block = lines.slice(i + 2, end < 0 ? lines.length : end)
+    const dateIndex = block.findIndex(line => /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(line))
+    const dateLine = dateIndex >= 0 ? block[dateIndex] : undefined
+    const text = block.slice(dateIndex >= 0 ? dateIndex + 1 : 0).filter(line => !profileFooter.test(line) && !/^message$/i.test(line)).join(' ').replace(/\s+/g, ' ').trim()
+    if (text.length >= 20) results.push({name: name.trim(), date: dateLine?.split(',')[0], relationship: block[dateIndex]?.split(',').slice(1).join(',').trim(), text: text.slice(0, 700)})
+  }
+  return results.slice(0, 30)
+}
 
 export function extractProfessionalProfile(text: string, name = ''): ProfileExtraction {
   const {sections, preamble} = splitProfileSections(text); const warnings: string[] = []
   const identityLines = preamble.filter(x => x.length > 1 && !/^\d+\s+(?:followers?|connections?)/i.test(x))
   const suppliedName = name || identityLines[0] || ''
-  const headline = identityLines.find(x => x !== suppliedName && x.length < 180 && !isLikelyCompany(x) && !/https?:\/\//i.test(x))
+  const headline = identityLines.find(x => x !== suppliedName && x.length < 180 && !isLikelyCompany(x) && !/https?:\/\//i.test(x) && /\b(head|director|vice president|vp|chief|manager|scientist|quality|analytical|cmc|r&d|development)\b/i.test(x))
   const location = identityLines.find(x => /\b(india|japan|usa|united states|uk|united kingdom|mumbai|tokyo|london|new york|singapore|canada|germany|switzerland)\b/i.test(x) && x !== headline)
   const fallbackLines = usefulLines(text)
-  const positions = parseExperience(sectionLines(sections, 'EXPERIENCE').length ? sectionLines(sections, 'EXPERIENCE') : fallbackLines)
+  const firstCompanyIndex = fallbackLines.findIndex(line => line.length < 120 && isLikelyCompany(line))
+  const firstDegreeIndex = fallbackLines.findIndex((line, index) => index > Math.max(0, firstCompanyIndex) && isLikelyDegree(line))
+  const looseExperience = fallbackLines.slice(Math.max(0, firstCompanyIndex), firstDegreeIndex > 0 ? firstDegreeIndex : fallbackLines.length)
+  const positions = parseExperience(sectionLines(sections, 'EXPERIENCE').length ? sectionLines(sections, 'EXPERIENCE') : looseExperience)
   const current = positions.find(x => x.end_date === '') || positions[0]
   const currentTitle = current?.title || (headline && /\b(head|director|vice president|vp|chief|manager|scientist|quality|analytical|cmc|r&d|development)\b/i.test(headline) ? headline : undefined)
   const currentCompany = current?.company_name
-  const about = cleanAbout(sectionLines(sections, 'ABOUT').join(' ').trim())
-  const education = parseEducation(sectionLines(sections, 'EDUCATION').length ? sectionLines(sections, 'EDUCATION') : fallbackLines)
+  const about = cleanAbout(sectionLines(sections, 'ABOUT').join(' ').trim() || fallbackLines.slice(0, firstCompanyIndex > 0 ? firstCompanyIndex : 0).join(' '))
+  const looseEducationStart = firstDegreeIndex > 0 ? firstDegreeIndex : fallbackLines.findIndex(line => /^education$/i.test(line))
+  const educationLines = sectionLines(sections, 'EDUCATION').length ? sectionLines(sections, 'EDUCATION') : fallbackLines.slice(looseEducationStart >= 0 ? looseEducationStart : fallbackLines.length)
+  const education = parseEducation(educationLines)
   const certifications = sectionLines(sections, 'CERTIFICATIONS').map(name => ({name, confidence: confidenceFor(name, true), review_suggested: isSuspiciousExtractedField(name)})).filter(x => x.name.length > 2).slice(0, 30)
   const projects = parseWorkSection(sectionLines(sections, 'PROJECTS'), 'PROJECT')
   const publications = parseWorkSection(sectionLines(sections, 'PUBLICATIONS'), 'PUBLICATION')
   const patents = parseWorkSection(sectionLines(sections, 'PATENTS'), 'PATENT')
   const activities = parseWorkSection(sectionLines(sections, 'ACTIVITY'), 'PROFESSIONAL_ACTIVITY')
+  const recommendations = parseRecommendations(sectionLines(sections, 'RECOMMENDATIONS'))
   const works = [...projects, ...publications, ...patents, ...activities]
   const skills = sectionLines(sections, 'SKILLS').flatMap(x => x.split(/,|•|;/).map(y => y.trim())).filter(x => x.length > 1 && x.length < 100 && !noisySkill.test(x)).slice(0, 40)
-  const profileClaims = [headline && `Professional headline: ${headline}`, currentTitle && `Current title: ${currentTitle}`, currentCompany && `Current company: ${currentCompany}`, location && `Professional location: ${location}`, about && `Professional summary: ${about.slice(0, 600)}`, skills.length && `Explicit professional skills: ${skills.slice(0, 12).join(', ')}`, certifications.length && `Certifications supplied: ${certifications.map(c => c.name).join(', ')}`].filter(Boolean) as string[]
+  const profileClaims = [headline && `Professional headline: ${headline}`, currentTitle && `Current title: ${currentTitle}`, currentCompany && `Current company: ${currentCompany}`, location && `Professional location: ${location}`, about && `Professional summary: ${about.slice(0, 600)}`, skills.length && `Explicit professional skills: ${skills.slice(0, 12).join(', ')}`, certifications.length && `Certifications supplied: ${certifications.map(c => c.name).join(', ')}`, recommendations.length && `Professional recommendations received from: ${recommendations.map(item => item.name).join(', ')}`].filter(Boolean) as string[]
   const themes = ['analytical development','analytical','quality','quality control','quality assurance','CMC','stability','degradation','impurity','regulatory','process development','API','method validation','nitrosamine','respiratory','data integrity'].filter(t => text.toLowerCase().includes(t.toLowerCase()))
   const keywords = [...new Set([suppliedName, currentCompany, currentTitle, location, ...themes, ...skills.slice(0, 10)].filter(Boolean).flatMap(x => String(x).split(/\s+/).filter(w => w.length > 3)))].slice(0, 80)
   if (!text.trim()) warnings.push('No machine-readable profile text was found.')
   if (!positions.length) warnings.push('No dated experience positions were detected.')
   if (education.some(x => x.review_suggested)) warnings.push('One or more education fields need review.')
-  return {claims: profileClaims, currentTitle, headline, currentCompany, location, about, skills, certifications, activities, positions, education, themes, keywords, works, warnings}
+  return {claims: profileClaims, currentTitle, headline, currentCompany, location, about, skills, certifications, activities, recommendations, positions, education, themes, keywords, works, warnings}
 }
 
 export function researchQueries(profile: ProfileExtraction, name: string): string[] {
   const base = [name, profile.currentCompany].filter(Boolean).join(' ')
   const terms = ['publication','patent','conference','webinar','analytical','quality','CMC','impurity','degradation','stability','method validation']
-  return [...new Set(terms.map(term => `${base} ${term}`)), ...profile.positions.slice(1, 4).flatMap(position => terms.slice(0, 4).map(term => `${name} ${position.company_name || ''} ${term}`))].filter(query => query.trim().split(/\s+/).length >= 2).slice(0, 20)
+  const recommenderQueries = (profile.recommendations || []).slice(0, 5).map(item => `${item.name} ${profile.currentCompany || ''} professional profile`)
+  return [...new Set([...terms.map(term => `${base} ${term}`), ...profile.positions.slice(1, 4).flatMap(position => terms.slice(0, 4).map(term => `${name} ${position.company_name || ''} ${term}`)), ...recommenderQueries])].filter(query => query.trim().split(/\s+/).length >= 2).slice(0, 25)
 }
 
 function reconstructPdfPage(items: any[]): { text: string; fragmented: boolean } {
