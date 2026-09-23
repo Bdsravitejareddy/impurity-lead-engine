@@ -102,6 +102,27 @@ describe('contact intelligence normalization', () => {
     expect(profile.positions[2]).toMatchObject({title: 'Sr. Manager ADL', company_name: 'Elder pharmaceuticals Ltd.'})
     expect(profile.positions[3]).toMatchObject({title: 'Asst. Manager', company_name: 'IPCA'})
   })
+  it('removes LinkedIn footer and endorsement noise from observed claims and summary', () => {
+    const profile = extractProfessionalProfile(`
+      Dr. Amit Gosar
+      Head - Indoco Analytical Solutions
+      Indoco Remedies Ltd
+      About
+      Experienced Head with a demonstrated history in pharmaceuticals. Skilled in method development and validation.
+      Accessibility Talent Solutions Community Guidelines Careers Marketing Solutions Privacy & Terms Ad Choices
+      Experience
+      Indoco Remedies Ltd
+      Head - Indoco Analytical Solutions
+      May 2008 - Present · 18 yrs 5 mos
+      Skills
+      Analytical Research and Development, HPLC, Endorsed by 25 colleagues at Indoco Remedies Ltd., Privacy & Terms
+    `, 'Dr. Amit Gosar')
+    expect(profile.claims.join(' ')).not.toMatch(/Accessibility|Endorsed by|Privacy & Terms/i)
+    expect(profile.skills).toEqual(expect.arrayContaining(['Analytical Research and Development', 'HPLC']))
+    expect(profile.skills).not.toContain('Endorsed by 25 colleagues at Indoco Remedies Ltd.')
+    const summary = personSummary(normalizeContactIntelligence('c1', {sources: [{contact_id:'c1',url:'manual://c1',status:'USED',source_type:'PROFESSIONAL_PROFILE'}], positions: profile.positions.map(x => ({contact_id:'c1',...x})), education: [], works: [], problems: [], themes: [], jtbd: [], claims: profile.claims.map(claim_text => ({contact_id:'c1',claim_text,provenance:'OBSERVED'})), notes: [], history: [], conflicts: [], researchRuns: []}), {name: 'Dr. Amit Gosar', title: 'Head - Indoco Analytical Solutions'}, 'Indoco Remedies Ltd')
+    expect(summary).not.toMatch(/Accessibility|Endorsed by|Privacy & Terms/i)
+  })
   it('flags corrupted extracted education text without deleting the source value', () => {
     expect(isSuspiciousExtractedField('be UCS $ / >> P')).toBe(true)
     expect(isSuspiciousExtractedField('MSc Chemistry')).toBe(false)

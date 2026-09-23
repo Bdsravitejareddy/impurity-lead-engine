@@ -46,6 +46,8 @@ const uiNoise = /^(home|my network|messaging|notifications|jobs|contact info|see
 // trailing tenure when building canonical career positions.
 const dateRange = /^(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+)?(?:19|20)\d{2}\s*(?:[-–—]|to)\s*(?:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+)?(?:(?:19|20)\d{2}|present|current)(?:\s*(?:·|\||•)\s*.*)?(?:\s*:\s*.*)?$/i
 const durationLine = /^\d+\s+(?:yr|yrs|year|years|mo|mos|month|months)/i
+const profileFooter = /^(?:accessibility|talent solutions|community guidelines|careers|marketing solutions|privacy & terms|ad choices|advertising|sales solutions|mobile small business|safety center|linkedin corporation|questions\?|visit our help center|recommendation transparency|learn more about recommended content|go to your settings|home|my network|messaging|notifications|search|me|for business|learning|more profiles for you|show more|show all \d+ educations?)\b/i
+const noisySkill = /(?:endorsement|endorsed by|logo$|show all|\b(?:all|industry knowledge|tools & technologies|interpersonal skills)\b|community guidelines|privacy & terms|linkedin corporation|\b\d+\+?\s+endorsements?\b)/i
 const cleanLine = (line: string) => line.replace(/\u00a0/g, ' ').replace(/[\t ]+/g, ' ').trim()
 const usefulLines = (text: string) => text.split(/\r?\n/).map(cleanLine).filter(Boolean)
 const canonicalHeading = (line: string) => sectionAliases[line.toLowerCase().replace(/\s+/g, ' ').trim()]
@@ -74,7 +76,13 @@ function parseDateRange(value: string): { start_date?: string; end_date?: string
 function isDateLine(line: string) { return dateRange.test(line) }
 function isLikelyCompany(line: string) { return /\b(pharma(?:ceuticals?)?|laborator(?:y|ies)|therapeutics?|biotech|inc\.?|ltd\.?|limited|corporation|corp\.?|holdings?|university|institute|hospital|group|cipla|takeda|novartis|bayer|lupin|ipca|indoco|elder)\b/i.test(line) }
 function isLikelyDegree(line: string) { return /\b(?:M\.?\s*(?:Sc|Pharm|Tech|Eng|BA|BS|MBA)|B\.?\s*(?:Pharm|Tech|Sc|Eng|BA|BS)|Ph\.?\s*D|Bachelor|Master|Doctor|Diploma|Certificate|Post[- ]?graduate|Fellowship)\b/i.test(line) }
-function sectionLines(sections: Record<string,string[]>, key: string) { return (sections[key] || []).filter(line => !uiNoise.test(line) && line.length > 1) }
+function sectionLines(sections: Record<string,string[]>, key: string) { return (sections[key] || []).filter(line => !uiNoise.test(line) && !profileFooter.test(line) && line.length > 1) }
+function cleanAbout(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const cleaned = value.split(/\b(?:Accessibility|Talent Solutions|Community Guidelines|Careers|Marketing Solutions|Privacy & Terms|Ad Choices|Advertising|Sales Solutions|LinkedIn Corporation)\b/i)[0]
+    .replace(/\s+/g, ' ').trim()
+  return cleaned.length >= 20 ? cleaned.slice(0, 700) : undefined
+}
 
 function parseExperience(lines: string[]): ProfilePosition[] {
   const positions: ProfilePosition[] = []; let lastDateIndex = -1; let currentCompany = ''
@@ -132,7 +140,7 @@ export function extractProfessionalProfile(text: string, name = ''): ProfileExtr
   const current = positions.find(x => x.end_date === '') || positions[0]
   const currentTitle = current?.title || (headline && /\b(head|director|vice president|vp|chief|manager|scientist|quality|analytical|cmc|r&d|development)\b/i.test(headline) ? headline : undefined)
   const currentCompany = current?.company_name
-  const about = sectionLines(sections, 'ABOUT').join(' ').trim() || undefined
+  const about = cleanAbout(sectionLines(sections, 'ABOUT').join(' ').trim())
   const education = parseEducation(sectionLines(sections, 'EDUCATION').length ? sectionLines(sections, 'EDUCATION') : fallbackLines)
   const certifications = sectionLines(sections, 'CERTIFICATIONS').map(name => ({name, confidence: confidenceFor(name, true), review_suggested: isSuspiciousExtractedField(name)})).filter(x => x.name.length > 2).slice(0, 30)
   const projects = parseWorkSection(sectionLines(sections, 'PROJECTS'), 'PROJECT')
@@ -140,8 +148,8 @@ export function extractProfessionalProfile(text: string, name = ''): ProfileExtr
   const patents = parseWorkSection(sectionLines(sections, 'PATENTS'), 'PATENT')
   const activities = parseWorkSection(sectionLines(sections, 'ACTIVITY'), 'PROFESSIONAL_ACTIVITY')
   const works = [...projects, ...publications, ...patents, ...activities]
-  const skills = sectionLines(sections, 'SKILLS').flatMap(x => x.split(/,|•|;/).map(y => y.trim())).filter(x => x.length > 1 && x.length < 100).slice(0, 60)
-  const profileClaims = [headline && `Professional headline: ${headline}`, currentTitle && `Current title: ${currentTitle}`, currentCompany && `Current company: ${currentCompany}`, location && `Professional location: ${location}`, about && `Professional summary: ${about.slice(0, 600)}`, skills.length && `Explicit professional skills: ${skills.join(', ')}`, certifications.length && `Certifications supplied: ${certifications.map(c => c.name).join(', ')}`].filter(Boolean) as string[]
+  const skills = sectionLines(sections, 'SKILLS').flatMap(x => x.split(/,|•|;/).map(y => y.trim())).filter(x => x.length > 1 && x.length < 100 && !noisySkill.test(x)).slice(0, 40)
+  const profileClaims = [headline && `Professional headline: ${headline}`, currentTitle && `Current title: ${currentTitle}`, currentCompany && `Current company: ${currentCompany}`, location && `Professional location: ${location}`, about && `Professional summary: ${about.slice(0, 600)}`, skills.length && `Explicit professional skills: ${skills.slice(0, 12).join(', ')}`, certifications.length && `Certifications supplied: ${certifications.map(c => c.name).join(', ')}`].filter(Boolean) as string[]
   const themes = ['analytical development','analytical','quality','quality control','quality assurance','CMC','stability','degradation','impurity','regulatory','process development','API','method validation','nitrosamine','respiratory','data integrity'].filter(t => text.toLowerCase().includes(t.toLowerCase()))
   const keywords = [...new Set([suppliedName, currentCompany, currentTitle, location, ...themes, ...skills.slice(0, 10)].filter(Boolean).flatMap(x => String(x).split(/\s+/).filter(w => w.length > 3)))].slice(0, 80)
   if (!text.trim()) warnings.push('No machine-readable profile text was found.')
@@ -233,12 +241,15 @@ export function researchCompleteness(intel: ContactIntelligence, contact: { prof
 export function personSummary(intel: ContactIntelligence, contact: { name: string; title?: string | null; function?: string | null }, company: string) {
   const completeness = researchCompleteness(intel, contact)
   if (completeness.state === 'UNRESEARCHED') return 'Not enough verified evidence is available to generate a person-level briefing yet.'
-  const observed = intel.claims.filter(c => c.provenance === 'OBSERVED').map(c => c.claim_text).join(' ')
-  const roles = intel.positions.map(p => [p.title, p.company_name].filter(Boolean).join(' at ')).join('; ')
+  const observedClaims = intel.claims.filter(c => c.provenance === 'OBSERVED').map(c => String(c.claim_text || '')).filter(Boolean)
+  const summaryClaim = observedClaims.find(c => /^professional summary:/i.test(c))
+  const headlineClaim = observedClaims.find(c => /^professional headline:/i.test(c))
+  const observed = [headlineClaim, summaryClaim].filter(Boolean).map(c => String(c).replace(/^[^:]+:\s*/, '')).join(' ')
+  const roles = intel.positions.slice(0, 5).map(p => [p.title, p.company_name].filter(Boolean).join(' at ')).join('; ')
   const direct = intel.works.filter(w => w.attribution === 'PERSON_DIRECT').map(w => w.title).join('; ')
   const companyWork = intel.works.filter(w => w.attribution !== 'PERSON_DIRECT').map(w => w.title).join('; ')
   const problems = intel.problems.map(p => p.problem).join('; ')
   const themes = intel.themes.map(t => t.theme).join(', ')
   const jtbd = intel.jtbd.slice(0, 3).map(j => j.statement).join('; ')
-  return `${contact.name} is publicly described as ${contact.title || 'a professional contact'} at ${company}${contact.function ? `, working in ${contact.function}` : ''}. ${observed} ${roles ? `The documented career progression includes ${roles}.` : ''} ${intel.education.length ? `Public education records include ${intel.education.map(e => [e.degree, e.institution].filter(Boolean).join(' at ')).join('; ')}.` : ''} ${direct ? `Person-direct professional work includes ${direct}.` : 'No person-specific technical publication, patent or project has been independently verified.'} ${companyWork ? `Relevant organisational context includes ${companyWork}. This establishes the working environment, not personal authorship.` : ''} ${problems ? `Documented or functionally supported problems include ${problems}.` : ''} ${themes ? `Recurring professional themes are ${themes}.` : ''} ${jtbd ? `Likely jobs to be done are inferred as ${jtbd}.` : ''} The account is relevant to SVAK because the role and evidence intersect with analytical quality, impurity control, stability, degradation or reference-standard workflows. This is a sales hypothesis rather than evidence of a current purchase requirement. Current priorities, active projects and supplier preferences remain unknown.`
+  return `${contact.name} is publicly described as ${contact.title || 'a professional contact'} at ${company}${contact.function ? `, working in ${contact.function}` : ''}. ${observed ? `The supplied profile describes ${observed}` : ''} ${roles ? `Documented career history includes ${roles}.` : ''} ${intel.education.length ? `Public education records include ${intel.education.slice(0, 3).map(e => [e.degree, e.institution].filter(Boolean).join(' at ')).join('; ')}.` : ''} ${direct ? `Person-direct technical work includes ${direct}.` : 'No person-specific technical publication, patent or project has been independently verified.'} ${companyWork ? `Organisational context includes ${companyWork}; this does not establish personal authorship.` : ''} ${problems ? `Role-related problem areas are ${problems}.` : ''} ${themes ? `Professional themes include ${themes}.` : ''} ${jtbd ? `Inferred JTBD hypotheses include ${jtbd}.` : ''} Current priorities, active projects, supplier preferences and purchase requirements remain unknown.`
 }
