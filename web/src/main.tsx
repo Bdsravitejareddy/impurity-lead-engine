@@ -110,9 +110,17 @@ function Contact360({contact,company,leads,onBack}:{contact:Contact;company:stri
       if(rows.education.length) await write('Save education',await supabase.from('contact_education').insert(rows.education))
       if(rows.works.length) await write('Save professional work',await supabase.from('contact_works').insert(rows.works))
       if(rows.themes.length) await write('Save professional themes',await supabase.from('contact_themes').upsert(rows.themes,{onConflict:'contact_id,theme'}))
-      const existingJtbd=await write('Read existing JTBD',await supabase.from('contact_jtbd').select('statement').eq('contact_id',contact.id))
-      const inferredJtbd=inferProfileJtbd(profile,contact.id,sourceId,(existingJtbd.data||[]).map((row:any)=>row.statement).filter(Boolean))
-      if(inferredJtbd.length) await write('Save inferred JTBD',await supabase.from('contact_jtbd').insert(inferredJtbd))
+      const existingJtbd=await write('Read existing JTBD',await supabase.from('contact_jtbd').select('id,statement,source_ids,basis').eq('contact_id',contact.id))
+      const existingByStatement=new Map((existingJtbd.data||[]).filter((row:any)=>row.statement).map((row:any)=>[String(row.statement).toLowerCase(),row]))
+      const inferredJtbd=inferProfileJtbd(profile,contact.id,sourceId)
+      const newJtbd:any[]=[]
+      for(const row of inferredJtbd){
+        const existing=existingByStatement.get(String(row.statement).toLowerCase()) as any
+        if(!existing){newJtbd.push(row);continue}
+        const sourceIds=Array.isArray(existing.source_ids)?existing.source_ids.filter(Boolean):[]
+        if(!sourceIds.includes(sourceId)||existing.basis!=='ROLE_ONTOLOGY_V1 + SUPPLIED_PROFILE_CONTEXT') await write('Update inferred JTBD provenance',await supabase.from('contact_jtbd').update({basis:row.basis,evidence:row.evidence,confidence:row.confidence,provenance:row.provenance,svak_mapping:row.svak_mapping,discovery_question:row.discovery_question,source_ids:[...new Set([...sourceIds,sourceId])] }).eq('id',existing.id))
+      }
+      if(newJtbd.length) await write('Save inferred JTBD',await supabase.from('contact_jtbd').insert(newJtbd))
     }
     const updates:any={}
     if(payload.name && payload.name!==contact.name) updates.display_name=payload.name
