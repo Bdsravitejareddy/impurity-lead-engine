@@ -1,0 +1,40 @@
+name: contact role intelligence backfill
+
+on:
+  schedule:
+    - cron: "47 3 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "audit is read-only; apply writes only INFERRED role hypotheses"
+        required: true
+        default: apply
+        type: choice
+        options: [audit, apply]
+
+permissions:
+  contents: read
+
+jobs:
+  infer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install .
+      - name: Backfill role hypotheses
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python scripts/backfill_role_inference.py --mode "${{ inputs.mode || 'apply' }}" | tee role-inference-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contact-role-inference-report
+          path: role-inference-report.json
+          if-no-files-found: ignore
+          retention-days: 14
