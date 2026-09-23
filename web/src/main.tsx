@@ -9,7 +9,7 @@ import { authView } from './lib/authState';
 import { bootstrapAuth } from './lib/authBootstrap';
 import { oauthRedirectUrl } from './lib/oauthRedirect';
 import { formatRefreshTime, contactId } from './lib/logic';
-import { researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText } from './data/contactIntelligence';
+import { researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText, PROFILE_PARSER_VERSION } from './data/contactIntelligence';
 import ProfileImportDialog from './components/ProfileImportDialog';
 import { normalizeProfileRows, profileSourceKey } from './data/profilePersistence';
 import { filterCompanyOpportunityGroups, groupCompanyOpportunities } from './data/opportunityGroups';
@@ -92,12 +92,16 @@ function Contact360({contact,company,leads,onBack}:{contact:Contact;company:stri
     const profile=payload.profile
     const hash=payload.raw?hashText(payload.raw):null
     const sourceUrlFinal=profileSourceKey(contact.id,payload.url,payload.raw)
-    const previous=await write('Check existing source',await supabase.from('contact_sources').select('id,status,content_hash').eq('contact_id',contact.id).eq('url',sourceUrlFinal).maybeSingle())
+    const previous=await write('Check existing source',await supabase.from('contact_sources').select('id,status,content_hash,extraction_json').eq('contact_id',contact.id).eq('url',sourceUrlFinal).maybeSingle())
     const source=await write('Save supplied source',await supabase.from('contact_sources').upsert({
-      contact_id:contact.id,url:sourceUrlFinal,title:payload.filename?('Supplied professional profile — '+payload.filename):'Supplied professional profile',publisher:'User supplied',source_type:'PROFESSIONAL_PROFILE',source_kind:'USER_SUPPLIED_PROFESSIONAL_SOURCE',source_description:payload.filename?('Supplied file: '+payload.filename):'Pasted or manually entered professional profile',raw_content:payload.raw||null,extraction_json:profile,content_hash:hash,status:profile.claims?.length?'USED':'PENDING_REVIEW',processing_status:'COMPLETED',why_used:profile.claims?.length?'Structured professional facts extracted from supplied content':'No structured facts extracted yet',rejection_reason:null,fetched_at:new Date().toISOString()
+      contact_id:contact.id,url:sourceUrlFinal,title:payload.filename?('Supplied professional profile — '+payload.filename):'Supplied professional profile',publisher:'User supplied',source_type:'PROFESSIONAL_PROFILE',source_kind:'USER_SUPPLIED_PROFESSIONAL_SOURCE',source_description:payload.filename?('Supplied file: '+payload.filename):'Pasted or manually entered professional profile',raw_content:payload.raw||null,extraction_json:{...profile,parser_version:PROFILE_PARSER_VERSION},content_hash:hash,status:profile.claims?.length?'USED':'PENDING_REVIEW',processing_status:'COMPLETED',why_used:profile.claims?.length?'Structured professional facts extracted from supplied content':'No structured facts extracted yet',rejection_reason:null,fetched_at:new Date().toISOString()
     },{onConflict:'contact_id,url'}).select('id').single())
     const sourceId=source.data.id
-    const sameSource=Boolean(previous.data?.content_hash&&hash&&previous.data.content_hash===hash)
+    const sameSource=Boolean(previous.data?.content_hash&&hash&&previous.data.content_hash===hash&&previous.data?.extraction_json?.parser_version===PROFILE_PARSER_VERSION)
+    const needsReprocess=Boolean(previous.data?.content_hash&&hash&&previous.data.content_hash===hash&&!sameSource&&sourceId)
+    if(needsReprocess){
+      for(const table of ['contact_claims','contact_positions','contact_education','contact_works','contact_themes']) await write('Clear previous parsed rows',await supabase.from(table).delete().eq('contact_id',contact.id).contains('source_ids',[sourceId]))
+    }
     if(previous.data?.status==='BLOCKED_AUTH'&&payload.raw) await write('Record supplied content transition',await supabase.from('contact_history').insert({contact_id:contact.id,entity_type:'contact_source',entity_id:sourceId,field_name:'status',old_value:{status:'BLOCKED_AUTH'},new_value:{status:'USED'},change_origin:'MANUAL',reason:'Profile content supplied for previously blocked professional URL',source_id:sourceId}))
     const rows=normalizeProfileRows(profile,contact.id,sourceId,safeDate)
     if(!sameSource){

@@ -1,6 +1,7 @@
 export type SourceState = 'DISCOVERED'|'QUEUED'|'FETCHING'|'INSPECTED'|'USED'|'REJECTED'|'BLOCKED_AUTH'|'FAILED'|'PENDING_REVIEW'
 export type ContactSource = { id?: string; url: string; title?: string; publisher?: string; source_type: string; source_date?: string | null; accessed_at?: string; status: SourceState; evidence_strength?: string; why_used?: string; why_not_used?: string; rejection_reason?: string; raw_content?: string; extraction_json?: any; claims?: string[] }
 export type ContactIntelligence = { sources: ContactSource[]; positions: any[]; education: any[]; works: any[]; problems: any[]; themes: any[]; jtbd: any[]; claims: any[]; notes: any[]; history: any[]; conflicts: any[]; researchRuns: any[] }
+export const PROFILE_PARSER_VERSION = '2'
 export const emptyIntelligence = (): ContactIntelligence => ({sources:[],positions:[],education:[],works:[],problems:[],themes:[],jtbd:[],claims:[],notes:[],history:[],conflicts:[],researchRuns:[]})
 export function dedupeSources(rows: any[] = []): ContactSource[] { const seen = new Map<string, any>(); for (const row of rows) { const key = String(row.url || '').trim().toLowerCase(); if (key && !seen.has(key)) seen.set(key, row) } return [...seen.values()] }
 export function normalizeContactIntelligence(contactId: string, tables: Record<string, any[]>): ContactIntelligence {
@@ -29,7 +30,7 @@ export type ProfileEducation = {institution:string; degree?:string; field?:strin
 export type ProfileWork = {title:string; work_type:string; work_date?:string; topic?:string; url?:string; authors?:string; publisher?:string; description?:string; attribution:'PERSON_DIRECT'; confidence:number; review_suggested?:boolean}
 export type PdfFailureClass = 'IMAGE_ONLY_PDF'|'TEXT_PRESENT_BUT_RECONSTRUCTION_FAILED'|'CORRUPT_OR_UNSUPPORTED_PDF'
 export type PdfTextExtraction = { text: string; pages: number; warnings: string[]; failureClass?: PdfFailureClass; metrics?: { itemCounts: number[]; characterCounts: number[]; averageItemLengths: number[]; fragmentedPages: number[] } }
-export type ProfileExtraction = { claims: string[]; currentTitle?: string; headline?: string; currentCompany?: string; location?: string; about?: string; skills?: string[]; certifications?: {name:string; issuer?:string; issue_date?:string; expiry_date?:string; credential_url?:string; confidence:number; review_suggested?:boolean}[]; activities?: ProfileWork[]; positions: ProfilePosition[]; education: ProfileEducation[]; themes: string[]; keywords: string[]; works: ProfileWork[]; warnings?: string[]; pages?: number }
+export type ProfileExtraction = { claims: string[]; currentTitle?: string; headline?: string; currentCompany?: string; location?: string; about?: string; skills?: string[]; certifications?: {name:string; issuer?:string; issue_date?:string; expiry_date?:string; credential_url?:string; confidence:number; review_suggested?:boolean}[]; activities?: ProfileWork[]; positions: ProfilePosition[]; education: ProfileEducation[]; themes: string[]; keywords: string[]; works: ProfileWork[]; warnings?: string[]; pages?: number; parser_version?: string }
 
 const sectionAliases: Record<string, string> = {
   'about':'ABOUT','experience':'EXPERIENCE','work experience':'EXPERIENCE','education':'EDUCATION',
