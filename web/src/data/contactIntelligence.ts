@@ -1,6 +1,6 @@
 export type SourceState = 'DISCOVERED'|'QUEUED'|'FETCHING'|'INSPECTED'|'USED'|'REJECTED'|'BLOCKED_AUTH'|'FAILED'|'PENDING_REVIEW'
 export type ContactSource = { id?: string; url: string; title?: string; publisher?: string; source_type: string; source_date?: string | null; accessed_at?: string; status: SourceState; evidence_strength?: string; why_used?: string; why_not_used?: string; rejection_reason?: string; raw_content?: string; extraction_json?: any; claims?: string[] }
-export type ContactIntelligence = { sources: ContactSource[]; positions: any[]; education: any[]; works: any[]; problems: any[]; themes: any[]; jtbd: any[]; claims: any[]; notes: any[]; history: any[]; conflicts: any[]; researchRuns: any[] }
+export type ContactIntelligence = { sources: ContactSource[]; positions: any[]; education: any[]; works: any[]; problems: any[]; themes: any[]; jtbd: any[]; persona: any[]; claims: any[]; notes: any[]; history: any[]; conflicts: any[]; researchRuns: any[] }
 // Bump when extraction or derived profile persistence changes so re-pasting an
 // unchanged source still repairs rows written by an older parser.
 export const PROFILE_PARSER_VERSION = '3'
@@ -52,7 +52,43 @@ export function inferProfileJtbd(profile: Pick<ProfileExtraction, 'currentTitle'
     source_ids: [sourceId],
   }))
 }
-export const emptyIntelligence = (): ContactIntelligence => ({sources:[],positions:[],education:[],works:[],problems:[],themes:[],jtbd:[],claims:[],notes:[],history:[],conflicts:[],researchRuns:[]})
+type PersonaProfile = Pick<ProfileExtraction, 'currentTitle' | 'currentCompany' | 'skills' | 'about' | 'positions' | 'education' | 'works' | 'themes'>
+/**
+ * Produce cautious professional-persona hypotheses from explicit profile
+ * observations. These are never treated as psychological facts or scoring
+ * inputs; every statement carries the source that supplied its anchors.
+ */
+export function inferProfilePersona(profile: PersonaProfile, contactId: string, sourceId: string) {
+  const anchors: string[] = []
+  const skills = [...new Set((profile.skills || []).map(String).map(x => x.trim()).filter(Boolean))].slice(0, 6)
+  const education = (profile.education || []).map(item => [item.degree, item.field, item.institution].filter(Boolean).join(' at ')).filter(Boolean).slice(0, 3)
+  const career = (profile.positions || []).map(item => [item.title, item.company_name].filter(Boolean).join(' at ')).filter(Boolean).slice(0, 4)
+  const works = (profile.works || []).map(item => [item.work_type, item.title, item.topic].filter(Boolean).join(': ')).filter(Boolean).slice(0, 3)
+  const themes = [...new Set((profile.themes || []).map(String).map(x => x.trim()).filter(Boolean))].slice(0, 6)
+  if (education.length) anchors.push(`education: ${education.join('; ')}`)
+  if (skills.length) anchors.push(`vocabulary/skills: ${skills.join(', ')}`)
+  if (career.length) anchors.push(`career: ${career.join('; ')}`)
+  if (works.length) anchors.push(`work: ${works.join('; ')}`)
+  if (themes.length) anchors.push(`themes: ${themes.join(', ')}`)
+  if (profile.about) anchors.push(`about: ${String(profile.about).slice(0, 220)}`)
+  if (!anchors.length) return []
+  const text = [profile.currentTitle, profile.currentCompany, ...skills, ...themes, profile.about].filter(Boolean).join(' ').toLowerCase()
+  const hypotheses: string[] = []
+  if (/analytical|method|hplc|chromatography|laboratory|impurity|stability|validation/.test(text)) hypotheses.push('Likely evidence-led and technically rigorous in professional decisions.')
+  if (/head|director|vp|vice president|chief|lead|manager/.test(text) || career.length > 1) hypotheses.push('Likely balances functional ownership with cross-functional coordination.')
+  if (/ph\.d|phd|master|mba|university|research|publication/.test(text) || education.length > 1) hypotheses.push('Likely values structured learning and defensible specialist evidence.')
+  if (/quality|gmp|regulatory|compliance|data integrity/.test(text)) hypotheses.push('Likely risk-aware and attentive to traceability, compliance and decision confidence.')
+  if (!hypotheses.length) hypotheses.push('Likely oriented toward the priorities reflected in the documented role and professional vocabulary.')
+  return hypotheses.slice(0, 4).map(statement => ({
+    contact_id: contactId,
+    claim_type: 'PERSONA_INFERENCE',
+    claim_text: `${statement} Anchored observations: ${anchors.join('; ')}.`,
+    provenance: 'INFERRED',
+    confidence: 0.52,
+    source_ids: [sourceId],
+  }))
+}
+export const emptyIntelligence = (): ContactIntelligence => ({sources:[],positions:[],education:[],works:[],problems:[],themes:[],jtbd:[],persona:[],claims:[],notes:[],history:[],conflicts:[],researchRuns:[]})
 export function dedupeSources(rows: any[] = []): ContactSource[] { const seen = new Map<string, any>(); for (const row of rows) { const key = String(row.url || '').trim().toLowerCase(); if (key && !seen.has(key)) seen.set(key, row) } return [...seen.values()] }
 export function normalizeContactIntelligence(contactId: string, tables: Record<string, any[]>): ContactIntelligence {
   const sourceRows = tables.sources?.filter(x => x.contact_id === contactId) ?? []
@@ -72,7 +108,8 @@ export function normalizeContactIntelligence(contactId: string, tables: Record<s
       why_used: 'Accepted canonical contact evidence',
       source_kind: 'CONTACT_EVIDENCE',
     }))
-  return { sources: dedupeSources([...sourceRows, ...evidenceSources]), positions: tables.positions?.filter(x => x.contact_id === contactId) ?? [], education: tables.education?.filter(x => x.contact_id === contactId) ?? [], works: tables.works?.filter(x => x.contact_id === contactId) ?? [], problems: tables.problems?.filter(x => x.contact_id === contactId) ?? [], themes: tables.themes?.filter(x => x.contact_id === contactId) ?? [], jtbd: tables.jtbd?.filter(x => x.contact_id === contactId) ?? [], claims: tables.claims?.filter(x => x.contact_id === contactId) ?? [], notes: tables.notes?.filter(x => x.contact_id === contactId) ?? [], history: tables.history?.filter(x => x.contact_id === contactId) ?? [], conflicts: tables.conflicts?.filter(x => x.contact_id === contactId) ?? [], researchRuns: tables.researchRuns?.filter(x => x.contact_id === contactId) ?? [] }
+  const claims = tables.claims?.filter(x => x.contact_id === contactId) ?? []
+  return { sources: dedupeSources([...sourceRows, ...evidenceSources]), positions: tables.positions?.filter(x => x.contact_id === contactId) ?? [], education: tables.education?.filter(x => x.contact_id === contactId) ?? [], works: tables.works?.filter(x => x.contact_id === contactId) ?? [], problems: tables.problems?.filter(x => x.contact_id === contactId) ?? [], themes: tables.themes?.filter(x => x.contact_id === contactId) ?? [], jtbd: tables.jtbd?.filter(x => x.contact_id === contactId) ?? [], persona: claims.filter(x => x.claim_type === 'PERSONA_INFERENCE'), claims: claims.filter(x => x.claim_type !== 'PERSONA_INFERENCE'), notes: tables.notes?.filter(x => x.contact_id === contactId) ?? [], history: tables.history?.filter(x => x.contact_id === contactId) ?? [], conflicts: tables.conflicts?.filter(x => x.contact_id === contactId) ?? [], researchRuns: tables.researchRuns?.filter(x => x.contact_id === contactId) ?? [] }
 }
 export function sourceCoverage(sources: ContactSource[]) { const classes = new Set(sources.map(s => s.source_type)); return { inspected: sources.length, used: sources.filter(s => s.status === 'USED').length, rejected: sources.filter(s => s.status === 'REJECTED').length, blocked: sources.filter(s => s.status === 'BLOCKED_AUTH').length, pending: sources.filter(s => s.status === 'PENDING_REVIEW').length, classes: classes.size, byType: [...classes].map(type => ({type, inspected: sources.filter(s => s.source_type === type).length, used: sources.filter(s => s.source_type === type && s.status === 'USED').length, rejected: sources.filter(s => s.source_type === type && s.status === 'REJECTED').length})) } }
 export type ProfilePosition = {title:string; company_name?:string; department?:string; start_date?:string; end_date?:string; location?:string; description?:string; employment_type?:string; attribution:'PERSON_DIRECT'; confidence:number; review_suggested?:boolean}
@@ -301,5 +338,6 @@ export function personSummary(intel: ContactIntelligence, contact: { name: strin
   const problems = intel.problems.map(p => p.problem).join('; ')
   const themes = intel.themes.map(t => t.theme).join(', ')
   const jtbd = intel.jtbd.slice(0, 3).map(j => j.statement).join('; ')
-  return `${contact.name} is publicly described as ${contact.title || 'a professional contact'} at ${company}${contact.function ? `, working in ${contact.function}` : ''}. ${observed ? `The supplied profile describes ${observed}` : ''} ${roles ? `Documented career history includes ${roles}.` : ''} ${intel.education.length ? `Public education records include ${intel.education.slice(0, 3).map(e => [e.degree, e.institution].filter(Boolean).join(' at ')).join('; ')}.` : ''} ${direct ? `Person-direct technical work includes ${direct}.` : 'No person-specific technical publication, patent or project has been independently verified.'} ${companyWork ? `Organisational context includes ${companyWork}; this does not establish personal authorship.` : ''} ${problems ? `Role-related problem areas are ${problems}.` : ''} ${themes ? `Professional themes include ${themes}.` : ''} ${jtbd ? `Inferred JTBD hypotheses include ${jtbd}.` : ''} Current priorities, active projects, supplier preferences and purchase requirements remain unknown.`
+  const persona = (intel.persona || []).slice(0, 2).map(item => String(item.claim_text || '').split(/\s+Anchored observations:/i)[0]).filter(Boolean).join(' ')
+  return `${contact.name} is publicly described as ${contact.title || 'a professional contact'} at ${company}${contact.function ? `, working in ${contact.function}` : ''}. ${observed ? `The supplied profile describes ${observed}` : ''} ${roles ? `Documented career history includes ${roles}.` : ''} ${intel.education.length ? `Public education records include ${intel.education.slice(0, 3).map(e => [e.degree, e.institution].filter(Boolean).join(' at ')).join('; ')}.` : ''} ${direct ? `Person-direct technical work includes ${direct}.` : 'No person-specific technical publication, patent or project has been independently verified.'} ${companyWork ? `Organisational context includes ${companyWork}; this does not establish personal authorship.` : ''} ${problems ? `Role-related problem areas are ${problems}.` : ''} ${themes ? `Professional themes include ${themes}.` : ''} ${jtbd ? `Inferred JTBD hypotheses include ${jtbd}.` : ''} ${persona ? `Persona hypotheses include ${persona}` : ''} Current priorities, active projects, supplier preferences and purchase requirements remain unknown.`
 }

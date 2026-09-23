@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { dedupeSources, normalizeContactIntelligence, sourceCoverage, researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText, isSuspiciousExtractedField, inferProfileJtbd } from '../data/contactIntelligence'
+import { dedupeSources, normalizeContactIntelligence, sourceCoverage, researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText, isSuspiciousExtractedField, inferProfileJtbd, inferProfilePersona } from '../data/contactIntelligence'
 import { normalizeProfileRows, profileSourceKey } from '../data/profilePersistence'
 
 describe('contact intelligence normalization', () => {
@@ -128,6 +128,23 @@ describe('contact intelligence normalization', () => {
     expect(rows.length).toBeGreaterThan(0)
     expect(rows[0]).toMatchObject({provenance: 'INFERRED', source_ids: ['source-1'], basis: 'ROLE_ONTOLOGY_V1 + SUPPLIED_PROFILE_CONTEXT'})
     expect(rows[0]).not.toHaveProperty('id')
+  })
+  it('derives persona hypotheses with explicit observation anchors', () => {
+    const persona = inferProfilePersona({
+      currentTitle: 'Head - Analytical Research', currentCompany: 'Indoco Remedies',
+      skills: ['Method development', 'HPLC', 'Validation'], about: 'Leads analytical development and impurity profiling.',
+      positions: [{title: 'Head - Analytical Research', company_name: 'Indoco Remedies'}, {title: 'Manager', company_name: 'IPCA'}],
+      education: [{degree: 'PhD Chemistry', institution: 'University of Mumbai'}], works: [], themes: ['analytical development', 'impurity']
+    }, 'contact-1', 'source-1')
+    expect(persona.length).toBeGreaterThan(0)
+    expect(persona[0]).toMatchObject({claim_type: 'PERSONA_INFERENCE', provenance: 'INFERRED', source_ids: ['source-1']})
+    expect(persona[0].claim_text).toMatch(/Anchored observations:/i)
+    expect(persona[0].claim_text).toMatch(/education|vocabulary|career|work/i)
+  })
+  it('separates persona inferences from ordinary claims', () => {
+    const intel = normalizeContactIntelligence('c1', {sources: [], positions: [], education: [], works: [], problems: [], themes: [], jtbd: [], claims: [{contact_id:'c1', claim_type:'PERSONA_INFERENCE', claim_text:'Working style hypothesis', provenance:'INFERRED'}], notes: [], history: [], conflicts: [], researchRuns: []})
+    expect(intel.persona).toHaveLength(1)
+    expect(intel.claims).toHaveLength(0)
   })
   it('flags corrupted extracted education text without deleting the source value', () => {
     expect(isSuspiciousExtractedField('be UCS $ / >> P')).toBe(true)
