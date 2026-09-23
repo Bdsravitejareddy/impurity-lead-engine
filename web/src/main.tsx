@@ -9,7 +9,7 @@ import { authView } from './lib/authState';
 import { bootstrapAuth } from './lib/authBootstrap';
 import { oauthRedirectUrl } from './lib/oauthRedirect';
 import { formatRefreshTime, contactId } from './lib/logic';
-import { researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText, PROFILE_PARSER_VERSION } from './data/contactIntelligence';
+import { researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText, inferProfileJtbd, PROFILE_PARSER_VERSION } from './data/contactIntelligence';
 import ProfileImportDialog from './components/ProfileImportDialog';
 import { normalizeProfileRows, profileSourceKey } from './data/profilePersistence';
 import { filterCompanyOpportunityGroups, groupCompanyOpportunities } from './data/opportunityGroups';
@@ -110,6 +110,9 @@ function Contact360({contact,company,leads,onBack}:{contact:Contact;company:stri
       if(rows.education.length) await write('Save education',await supabase.from('contact_education').insert(rows.education))
       if(rows.works.length) await write('Save professional work',await supabase.from('contact_works').insert(rows.works))
       if(rows.themes.length) await write('Save professional themes',await supabase.from('contact_themes').upsert(rows.themes,{onConflict:'contact_id,theme'}))
+      const existingJtbd=await write('Read existing JTBD',await supabase.from('contact_jtbd').select('statement').eq('contact_id',contact.id))
+      const inferredJtbd=inferProfileJtbd(profile,contact.id,sourceId,(existingJtbd.data||[]).map((row:any)=>row.statement).filter(Boolean))
+      if(inferredJtbd.length) await write('Save inferred JTBD',await supabase.from('contact_jtbd').insert(inferredJtbd))
     }
     const updates:any={}
     if(payload.name && payload.name!==contact.name) updates.display_name=payload.name

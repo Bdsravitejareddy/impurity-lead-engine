@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { dedupeSources, normalizeContactIntelligence, sourceCoverage, researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText, isSuspiciousExtractedField } from '../data/contactIntelligence'
+import { dedupeSources, normalizeContactIntelligence, sourceCoverage, researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText, isSuspiciousExtractedField, inferProfileJtbd } from '../data/contactIntelligence'
 import { normalizeProfileRows, profileSourceKey } from '../data/profilePersistence'
 
 describe('contact intelligence normalization', () => {
@@ -122,6 +122,12 @@ describe('contact intelligence normalization', () => {
     expect(profile.skills).not.toContain('Endorsed by 25 colleagues at Indoco Remedies Ltd.')
     const summary = personSummary(normalizeContactIntelligence('c1', {sources: [{contact_id:'c1',url:'manual://c1',status:'USED',source_type:'PROFESSIONAL_PROFILE'}], positions: profile.positions.map(x => ({contact_id:'c1',...x})), education: [], works: [], problems: [], themes: [], jtbd: [], claims: profile.claims.map(claim_text => ({contact_id:'c1',claim_text,provenance:'OBSERVED'})), notes: [], history: [], conflicts: [], researchRuns: []}), {name: 'Dr. Amit Gosar', title: 'Head - Indoco Analytical Solutions'}, 'Indoco Remedies Ltd')
     expect(summary).not.toMatch(/Accessibility|Endorsed by|Privacy & Terms/i)
+  })
+  it('derives traceable inferred JTBD immediately from supplied profile context', () => {
+    const rows = inferProfileJtbd({currentTitle: 'Head Analytical Research and Development', currentCompany: 'Indoco Remedies Ltd', skills: ['HPLC', 'Method validation'], about: 'Leads analytical method development.'}, 'c1', 'source-1')
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows[0]).toMatchObject({provenance: 'INFERRED', source_ids: ['source-1'], basis: 'ROLE_ONTOLOGY_V1 + SUPPLIED_PROFILE_CONTEXT'})
+    expect(rows[0]).not.toHaveProperty('id')
   })
   it('flags corrupted extracted education text without deleting the source value', () => {
     expect(isSuspiciousExtractedField('be UCS $ / >> P')).toBe(true)

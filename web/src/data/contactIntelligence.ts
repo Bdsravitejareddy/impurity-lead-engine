@@ -1,7 +1,57 @@
 export type SourceState = 'DISCOVERED'|'QUEUED'|'FETCHING'|'INSPECTED'|'USED'|'REJECTED'|'BLOCKED_AUTH'|'FAILED'|'PENDING_REVIEW'
 export type ContactSource = { id?: string; url: string; title?: string; publisher?: string; source_type: string; source_date?: string | null; accessed_at?: string; status: SourceState; evidence_strength?: string; why_used?: string; why_not_used?: string; rejection_reason?: string; raw_content?: string; extraction_json?: any; claims?: string[] }
 export type ContactIntelligence = { sources: ContactSource[]; positions: any[]; education: any[]; works: any[]; problems: any[]; themes: any[]; jtbd: any[]; claims: any[]; notes: any[]; history: any[]; conflicts: any[]; researchRuns: any[] }
-export const PROFILE_PARSER_VERSION = '2'
+// Bump when extraction or derived profile persistence changes so re-pasting an
+// unchanged source still repairs rows written by an older parser.
+export const PROFILE_PARSER_VERSION = '3'
+
+const roleJtbdTemplates: Record<string, string[]> = {
+  analytical: [
+    'Define and maintain analytical methods for identity, purity, impurities and degradation products.',
+    'Review laboratory results, investigations and method performance for release or stability decisions.',
+    'Coordinate analytical quality priorities with internal laboratories and external technical partners.',
+  ],
+  quality: [
+    'Ensure quality systems and analytical records support compliant product decisions.',
+    'Review deviations, CAPA and validation evidence with the responsible technical teams.',
+    'Assess external technical work for quality-system and regulatory fit.',
+  ],
+  cmc: [
+    'Develop and transfer robust processes with defined impurity and degradation controls.',
+    'Evaluate process data and analytical evidence during scale-up or technical transfer.',
+    'Coordinate specialist external support for process, impurity or stability work.',
+  ],
+  regulatory: [
+    'Assemble and maintain technical evidence required for regulatory submissions and responses.',
+    'Identify evidence gaps in impurity, stability and analytical documentation.',
+    'Coordinate technical contributors so submitted quality information is consistent and traceable.',
+  ],
+  procurement: [
+    'Identify and qualify suppliers for technically critical materials and services.',
+    'Compare supplier capability, quality evidence, delivery risk and commercial fit.',
+    'Coordinate procurement decisions with analytical, quality and regulatory stakeholders.',
+  ],
+}
+
+export function inferProfileJtbd(profile: Pick<ProfileExtraction, 'currentTitle' | 'currentCompany' | 'skills' | 'about'>, contactId: string, sourceId: string, existingStatements: string[] = []) {
+  const text = [profile.currentTitle, profile.currentCompany, ...(profile.skills || []), profile.about].filter(Boolean).join(' ').toLowerCase()
+  const family = text.match(/analytical|method development|hplc|chromatography|laboratory|quality control|quality assurance|gmp|validation|data integrity|cmc|process development|technical operations|regulatory|submission|procurement|sourcing|supplier/)?.[0]
+  const key = /analytical|method development|hplc|chromatography|laboratory|quality control/.test(text) ? 'analytical' : /quality assurance|gmp|validation|data integrity/.test(text) ? 'quality' : /cmc|process development|technical operations/.test(text) ? 'cmc' : /regulatory|submission/.test(text) ? 'regulatory' : /procurement|sourcing|supplier/.test(text) ? 'procurement' : null
+  if (!key) return []
+  const existing = new Set(existingStatements.map(value => value.toLowerCase()))
+  return roleJtbdTemplates[key].filter(statement => !existing.has(statement.toLowerCase())).map(statement => ({
+    contact_id: contactId,
+    statement,
+    category: key,
+    basis: 'ROLE_ONTOLOGY_V1 + SUPPLIED_PROFILE_CONTEXT',
+    evidence: 'Derived from the supplied professional profile; independently verify with person-specific evidence.',
+    confidence: family ? 0.68 : 0.58,
+    provenance: 'INFERRED',
+    svak_mapping: 'Role and profile context indicate a possible technical or quality workflow fit.',
+    discovery_question: 'Is this an active responsibility or requirement for your team today?',
+    source_ids: [sourceId],
+  }))
+}
 export const emptyIntelligence = (): ContactIntelligence => ({sources:[],positions:[],education:[],works:[],problems:[],themes:[],jtbd:[],claims:[],notes:[],history:[],conflicts:[],researchRuns:[]})
 export function dedupeSources(rows: any[] = []): ContactSource[] { const seen = new Map<string, any>(); for (const row of rows) { const key = String(row.url || '').trim().toLowerCase(); if (key && !seen.has(key)) seen.set(key, row) } return [...seen.values()] }
 export function normalizeContactIntelligence(contactId: string, tables: Record<string, any[]>): ContactIntelligence {
