@@ -179,6 +179,8 @@ describe('contact intelligence normalization', () => {
       Chicago University
       D. Sc., Chemistry
       2005 – 2006
+      Professional member
+      Practitioner membership of Complementary Therapists Accredited Association
       Recommendations
       Mayank M.
       · 3rd
@@ -189,6 +191,7 @@ describe('contact intelligence normalization', () => {
     expect(profile.positions.map(position => position.title)).toEqual(expect.arrayContaining(['Head - Indoco Analytical Solutions', 'Head Analytical research and development (API)', 'Sr. Manager ADL', 'Asst. Manager']))
     expect(profile.positions.every(position => !/degree|chemistry|mba|digital/i.test(position.title))).toBe(true)
     expect(profile.education.some(item => /MBA/i.test(item.degree || '') && /Chicago/i.test(item.institution))).toBe(true)
+    expect(profile.certifications?.map(item => item.name)).toEqual(expect.arrayContaining(['Professional member', 'Practitioner membership of Complementary Therapists Accredited Association']))
     expect(profile.recommendations?.[0]).toMatchObject({name: 'Mayank M.'})
     expect(researchQueries(profile, 'Dr. Amit Gosar')).toContain('Mayank M. Indoco Remedies Ltd professional profile')
   })

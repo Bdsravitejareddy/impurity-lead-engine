@@ -3,7 +3,7 @@ export type ContactSource = { id?: string; url: string; title?: string; publishe
 export type ContactIntelligence = { sources: ContactSource[]; positions: any[]; education: any[]; works: any[]; problems: any[]; themes: any[]; jtbd: any[]; persona: any[]; claims: any[]; notes: any[]; history: any[]; conflicts: any[]; researchRuns: any[] }
 // Bump when extraction or derived profile persistence changes so re-pasting an
 // unchanged source still repairs rows written by an older parser.
-export const PROFILE_PARSER_VERSION = '6'
+export const PROFILE_PARSER_VERSION = '7'
 
 const roleJtbdTemplates: Record<string, string[]> = {
   analytical: [
@@ -275,7 +275,8 @@ export function extractProfessionalProfile(text: string, name = ''): ProfileExtr
   const looseEducationStart = firstDegreeIndex > 0 ? firstDegreeIndex : fallbackLines.findIndex(line => /^education$/i.test(line))
   const educationLines = sectionLines(sections, 'EDUCATION').length ? sectionLines(sections, 'EDUCATION') : fallbackLines.slice(looseEducationStart >= 0 ? looseEducationStart : fallbackLines.length)
   const education = parseEducation(educationLines)
-  const certifications = sectionLines(sections, 'CERTIFICATIONS').map(name => ({name, confidence: confidenceFor(name, true), review_suggested: isSuspiciousExtractedField(name)})).filter(x => x.name.length > 2).slice(0, 30)
+  const certificationNames = sectionLines(sections, 'CERTIFICATIONS').length ? sectionLines(sections, 'CERTIFICATIONS') : fallbackLines.filter(line => /^(?:professional member|practitioner membership|membership of leaders)/i.test(line))
+  const certifications = certificationNames.map(name => ({name, confidence: confidenceFor(name, true), review_suggested: isSuspiciousExtractedField(name)})).filter(x => x.name.length > 2).slice(0, 30)
   const projects = parseWorkSection(sectionLines(sections, 'PROJECTS'), 'PROJECT')
   const publications = parseWorkSection(sectionLines(sections, 'PUBLICATIONS'), 'PUBLICATION')
   const patents = parseWorkSection(sectionLines(sections, 'PATENTS'), 'PATENT')
