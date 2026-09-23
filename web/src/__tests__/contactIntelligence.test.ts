@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { dedupeSources, normalizeContactIntelligence, sourceCoverage, researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText, isSuspiciousExtractedField, inferProfileJtbd, inferProfilePersona } from '../data/contactIntelligence'
+import { dedupeSources, normalizeContactIntelligence, sourceCoverage, researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText, isSuspiciousExtractedField, inferProfileJtbd, inferProfilePersona, inferProfileProblems } from '../data/contactIntelligence'
 import { normalizeProfileRows, profileSourceKey } from '../data/profilePersistence'
 
 describe('contact intelligence normalization', () => {
@@ -145,6 +145,12 @@ describe('contact intelligence normalization', () => {
     const intel = normalizeContactIntelligence('c1', {sources: [], positions: [], education: [], works: [], problems: [], themes: [], jtbd: [], claims: [{contact_id:'c1', claim_type:'PERSONA_INFERENCE', claim_text:'Working style hypothesis', provenance:'INFERRED'}], notes: [], history: [], conflicts: [], researchRuns: []})
     expect(intel.persona).toHaveLength(1)
     expect(intel.claims).toHaveLength(0)
+  })
+  it('derives role problems from supplied evidence without claiming observed demand', () => {
+    const problems = inferProfileProblems({currentTitle: 'Head Analytical Research', currentCompany: 'Indoco Remedies', skills: ['HPLC'], about: 'Leads impurity profiling and validation.'}, 'contact-1', 'source-1')
+    expect(problems.length).toBeGreaterThan(0)
+    expect(problems[0]).toMatchObject({attribution: 'FUNCTIONAL', confidence: 0.6, source_ids: ['source-1']})
+    expect(problems[0].problem).toMatch(/analytical|impurit/i)
   })
   it('flags corrupted extracted education text without deleting the source value', () => {
     expect(isSuspiciousExtractedField('be UCS $ / >> P')).toBe(true)

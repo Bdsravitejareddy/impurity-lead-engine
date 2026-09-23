@@ -9,7 +9,7 @@ import { authView } from './lib/authState';
 import { bootstrapAuth } from './lib/authBootstrap';
 import { oauthRedirectUrl } from './lib/oauthRedirect';
 import { formatRefreshTime, contactId } from './lib/logic';
-import { researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText, inferProfileJtbd, inferProfilePersona, PROFILE_PARSER_VERSION } from './data/contactIntelligence';
+import { researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText, inferProfileJtbd, inferProfilePersona, inferProfileProblems, PROFILE_PARSER_VERSION } from './data/contactIntelligence';
 import ProfileImportDialog from './components/ProfileImportDialog';
 import { normalizeProfileRows, profileSourceKey } from './data/profilePersistence';
 import { filterCompanyOpportunityGroups, groupCompanyOpportunities } from './data/opportunityGroups';
@@ -100,7 +100,7 @@ function Contact360({contact,company,leads,onBack}:{contact:Contact;company:stri
     const sameSource=Boolean(previous.data?.content_hash&&hash&&previous.data.content_hash===hash&&previous.data?.extraction_json?.parser_version===PROFILE_PARSER_VERSION)
     const needsReprocess=Boolean(previous.data?.content_hash&&hash&&previous.data.content_hash===hash&&!sameSource&&sourceId)
     if(needsReprocess){
-      for(const table of ['contact_claims','contact_positions','contact_education','contact_works','contact_themes','contact_jtbd']) await write('Clear previous parsed rows',await supabase.from(table).delete().eq('contact_id',contact.id).contains('source_ids',[sourceId]))
+      for(const table of ['contact_claims','contact_positions','contact_education','contact_works','contact_themes','contact_jtbd','contact_problems']) await write('Clear previous parsed rows',await supabase.from(table).delete().eq('contact_id',contact.id).contains('source_ids',[sourceId]))
     }
     if(previous.data?.status==='BLOCKED_AUTH'&&payload.raw) await write('Record supplied content transition',await supabase.from('contact_history').insert({contact_id:contact.id,entity_type:'contact_source',entity_id:sourceId,field_name:'status',old_value:{status:'BLOCKED_AUTH'},new_value:{status:'USED'},change_origin:'MANUAL',reason:'Profile content supplied for previously blocked professional URL',source_id:sourceId}))
     const rows=normalizeProfileRows(profile,contact.id,sourceId,safeDate)
@@ -108,6 +108,14 @@ function Contact360({contact,company,leads,onBack}:{contact:Contact;company:stri
       if(rows.claims.length) await write('Save profile claims',await supabase.from('contact_claims').insert(rows.claims))
       const persona=inferProfilePersona(profile,contact.id,sourceId)
       if(persona.length) await write('Save persona hypotheses',await supabase.from('contact_claims').insert(persona))
+      const problems=inferProfileProblems(profile,contact.id,sourceId)
+      if(problems.length){
+        const existingProblems=await write('Read existing profile problems',await supabase.from('contact_problems').select('id,problem,source_ids').eq('contact_id',contact.id))
+        const existingByProblem=new Map((existingProblems.data||[]).filter((row:any)=>row.problem).map((row:any)=>[String(row.problem).toLowerCase(),row]))
+        const newProblems:any[]=[]
+        for(const row of problems){const existing=existingByProblem.get(row.problem.toLowerCase()) as any;if(!existing){newProblems.push(row);continue}const sourceIds=Array.isArray(existing.source_ids)?existing.source_ids.filter(Boolean):[];if(!sourceIds.includes(sourceId)) await write('Update profile problem provenance',await supabase.from('contact_problems').update({source_ids:[...new Set([...sourceIds,sourceId])],context:row.context,attribution:row.attribution,technical_relevance:row.technical_relevance,svak_relevance:row.svak_relevance,confidence:row.confidence}).eq('id',existing.id))}
+        if(newProblems.length) await write('Save profile problems',await supabase.from('contact_problems').insert(newProblems))
+      }
       if(rows.positions.length) await write('Save career positions',await supabase.from('contact_positions').insert(rows.positions))
       if(rows.education.length) await write('Save education',await supabase.from('contact_education').insert(rows.education))
       if(rows.works.length) await write('Save professional work',await supabase.from('contact_works').insert(rows.works))

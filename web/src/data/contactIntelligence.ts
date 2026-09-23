@@ -3,7 +3,7 @@ export type ContactSource = { id?: string; url: string; title?: string; publishe
 export type ContactIntelligence = { sources: ContactSource[]; positions: any[]; education: any[]; works: any[]; problems: any[]; themes: any[]; jtbd: any[]; persona: any[]; claims: any[]; notes: any[]; history: any[]; conflicts: any[]; researchRuns: any[] }
 // Bump when extraction or derived profile persistence changes so re-pasting an
 // unchanged source still repairs rows written by an older parser.
-export const PROFILE_PARSER_VERSION = '4'
+export const PROFILE_PARSER_VERSION = '5'
 
 const roleJtbdTemplates: Record<string, string[]> = {
   analytical: [
@@ -51,6 +51,19 @@ export function inferProfileJtbd(profile: Pick<ProfileExtraction, 'currentTitle'
     discovery_question: 'Is this an active responsibility or requirement for your team today?',
     source_ids: [sourceId],
   }))
+}
+export function inferProfileProblems(profile: Pick<ProfileExtraction, 'currentTitle' | 'currentCompany' | 'skills' | 'about'>, contactId: string, sourceId: string) {
+  const text = [profile.currentTitle, profile.currentCompany, ...(profile.skills || []), profile.about].filter(Boolean).join(' ').toLowerCase()
+  const templates = /analytical|method development|hplc|chromatography|laboratory|quality control/.test(text)
+    ? ['maintaining reliable analytical methods', 'controlling impurities and degradation products', 'managing laboratory data integrity']
+    : /quality assurance|gmp|validation|data integrity/.test(text)
+      ? ['maintaining compliant quality systems', 'reviewing deviations, CAPA and audit readiness', 'ensuring validated data supports regulated decisions']
+      : /cmc|process development|technical operations/.test(text)
+        ? ['scaling a robust process', 'controlling process-related impurities', 'transferring technical methods into manufacturing']
+        : /regulatory|submission/.test(text)
+          ? ['assembling defensible CMC evidence', 'answering regulator questions', 'maintaining consistent technical documentation']
+          : []
+  return templates.map(problem => ({contact_id: contactId, problem, context: 'Role and supplied profile vocabulary support this functional hypothesis; current active need is not confirmed.', attribution: 'FUNCTIONAL', technical_relevance: 'analytical_quality', svak_relevance: 'INFERRED', confidence: 0.6, source_ids: [sourceId]}))
 }
 type PersonaProfile = Pick<ProfileExtraction, 'currentTitle' | 'currentCompany' | 'skills' | 'about' | 'positions' | 'education' | 'works' | 'themes'>
 /**
