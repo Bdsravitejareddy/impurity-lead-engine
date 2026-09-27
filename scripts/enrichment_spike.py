@@ -30,15 +30,29 @@ TERMS = ("impurity", "degradation", "nitrosamine", "ndsri", "genotoxic", "stabil
 
 def enrich_candidate(candidate, max_pages, deadline):
     settings_timeout = httpx.Timeout(20.0, connect=5.0)
+    source_status = {
+        "company_site": {"attempted": False, "status": "not_configured", "records": 0},
+        "europe_pmc": {"attempted": False, "status": "not_configured", "records": 0},
+        "fda": {"attempted": False, "status": "not_configured", "records": 0},
+        "regulatory": {"attempted": False, "status": "not_configured", "records": 0},
+    }
+    enrich_candidate.last_source_status = source_status
     with create_crawl_client(timeout=settings_timeout) as client:
-        policy = RobotsPolicy.fetch(client, f"https://{candidate.domain}", "SVAK-Impurity-Lead-Research/0.1")
-        if policy.disallow_all:
-            return []
-        urls = [f"https://{candidate.domain}/"]
-        try:
-            urls.extend(CommonCrawlAdapter(client=client, max_urls_per_domain=max_pages, sleep_fn=lambda _: None).discover(candidate.domain, url_terms=TERMS))
-        except Exception:
-            pass
+        policy = None
+        urls = []
+        if candidate.domain:
+            try:
+                source_status["company_site"]["attempted"] = True
+                policy = RobotsPolicy.fetch(client, f"https://{candidate.domain}", "SVAK-Impurity-Lead-Research/0.1")
+                if not policy.disallow_all:
+                    urls = [f"https://{candidate.domain}/"]
+                    urls.extend(CommonCrawlAdapter(client=client, max_urls_per_domain=max_pages, sleep_fn=lambda _: None).discover(candidate.domain, url_terms=TERMS))
+                else:
+                    source_status["company_site"].update(status="failed", error="robots_blocked")
+            except Exception:
+                source_status["company_site"].update(status="failed", error="transport")
+        else:
+            source_status["company_site"].update(status="no_match")
         seen = set()
         adapter = CompanySiteAdapter()
         for url in urls:
@@ -52,12 +66,16 @@ def enrich_candidate(candidate, max_pages, deadline):
                 if response.status_code != 200:
                     continue
                 records = adapter.parse_html(url, response.text, candidate.company_name, [candidate.molecule])
+                source_status["company_site"]["records"] += len(records)
             except Exception:
                 records = []
             for record in records:
                 yield record, 1
+        if source_status["company_site"]["attempted"] and source_status["company_site"]["status"] == "not_configured":
+            source_status["company_site"]["status"] = "records" if source_status["company_site"]["records"] else "no_match"
 
         if len(seen) < max_pages and time.monotonic() < deadline:
+            source_status["europe_pmc"]["attempted"] = True
             query = f'"{candidate.molecule}" AND ({" OR ".join(TERMS)})'
             try:
                 response = client.get("https://www.ebi.ac.uk/europepmc/webservices/rest/search",
@@ -72,10 +90,13 @@ def enrich_candidate(candidate, max_pages, deadline):
                                                source_url=url, fetched_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
                                                company_name_raw=candidate.company_name, molecule_name_raw=candidate.molecule,
                                                signal_text=text), 1
+                            source_status["europe_pmc"]["records"] += 1
+                source_status["europe_pmc"]["status"] = "records" if source_status["europe_pmc"]["records"] else "no_match"
             except Exception:
-                pass
+                source_status["europe_pmc"].update(status="failed", error="transport")
 
         if len(seen) < max_pages and time.monotonic() < deadline:
+            source_status["fda"]["attempted"] = True
             try:
                 response = client.get("https://api.fda.gov/drug/drugsfda.json", params={"limit": 20, "search": f'products.active_ingredients.name:"{quote_plus(candidate.molecule)}"'})
                 if response.status_code == 200:
@@ -84,8 +105,10 @@ def enrich_candidate(candidate, max_pages, deadline):
                         for record in records:
                             if record.company_name_raw and candidate.company_name.casefold() in record.company_name_raw.casefold() and candidate.molecule.casefold() in (record.molecule_name_raw or "").casefold():
                                 yield record, 1
+                                source_status["fda"]["records"] += 1
+                source_status["fda"]["status"] = "records" if source_status["fda"]["records"] else "no_match"
             except Exception:
-                pass
+                source_status["fda"].update(status="failed", error="transport")
 
 
 def main():

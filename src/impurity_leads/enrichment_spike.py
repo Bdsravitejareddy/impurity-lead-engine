@@ -5,6 +5,7 @@ SourceRecord/classifier/scoring pipeline. It is not the durable watchlist.
 """
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import re
 import time
 from typing import Callable, Iterable
 
@@ -18,6 +19,33 @@ from impurity_leads.storage.memory import MemoryLeadStore
 
 TECHNICAL_TERMS = ("impurity", "degradation", "nitrosamine", "ndsri", "genotoxic",
                    "stability", "analytical", "validation")
+_SALT_SUFFIXES = ("calcium", "sodium", "potassium", "hydrochloride", "hydrobromide",
+                  "besylate", "mesylate", "acetate", "fumarate", "maleate", "succinate")
+
+
+def molecules_equivalent(left: str, right: str) -> bool:
+    """Match an exact molecule or one of its explicitly known salt forms."""
+    first = normalize_molecule_name(left)
+    second = normalize_molecule_name(right)
+    if first == second:
+        return True
+    for value, other in ((first, second), (second, first)):
+        for salt in _SALT_SUFFIXES:
+            suffix = f" {salt}"
+            if value.endswith(suffix) and value[: -len(suffix)] == other:
+                return True
+    return False
+
+
+def _molecule_forms(value: str) -> tuple[str, ...]:
+    normalized = normalize_molecule_name(value)
+    forms = [normalized]
+    for salt in _SALT_SUFFIXES:
+        suffix = f" {salt}"
+        if normalized.endswith(suffix):
+            forms.append(normalized[: -len(suffix)])
+            break
+    return tuple(forms)
 
 
 @dataclass
@@ -93,12 +121,14 @@ def select_candidates(rows: Iterable[dict], limit: int = 5, domain_overrides: di
 def accept_evidence(candidate: Candidate, record: SourceRecord) -> bool:
     company = normalize_company_name(record.company_name_raw or "")
     molecule = normalize_molecule_name(record.molecule_name_raw or record.active_ingredient_raw or "")
-    if company != normalize_company_name(candidate.company_name) or molecule != normalize_molecule_name(candidate.molecule):
+    if company != normalize_company_name(candidate.company_name) or not molecules_equivalent(candidate.molecule, molecule):
         return False
     if record.metadata_json.get("is_impurity_vendor") or looks_like_impurity_vendor(record.signal_text):
         return False
     text = record.signal_text.casefold()
-    return normalize_molecule_name(candidate.molecule) in text and any(term in text for term in TECHNICAL_TERMS)
+    molecule_forms = _molecule_forms(candidate.molecule) + _molecule_forms(molecule)
+    mentioned = any(re.search(rf"\b{re.escape(form)}\b", text) for form in molecule_forms if form)
+    return mentioned and any(term in text for term in TECHNICAL_TERMS)
 
 
 def _baseline(candidate: Candidate) -> list[SourceRecord]:
@@ -137,7 +167,8 @@ def run_spike(candidates: list[Candidate], enrich: Callable[[Candidate, int, flo
                 "evidence_found": [r.signal_text for r in found], "accepted_signal_types": [s.signal_type for s in store.signals if s.signal_type != "regulatory_application"],
                 "rejected": [{"url": getattr(r, "source_url", ""), "reason": "linkage_or_term_check"} for r in rejected if isinstance(r, SourceRecord)],
                 "source_urls": urls, "pages": pages, "requests": pages, "elapsed_seconds": max(0.0, clock() - started),
-                "final_score": final_score, "priority": match.priority if match else None}
+                "final_score": final_score, "priority": match.priority if match else None,
+                "source_status": getattr(enrich, "last_source_status", {})}
         report["investigated"].append(item)
         if match and match.score >= 50:
             report["promoted"].append(item)

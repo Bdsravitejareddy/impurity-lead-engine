@@ -481,8 +481,8 @@ Negative weights:
 
 - known impurity/reference-standard vendor: -100
 - no named molecule/API after enrichment: -25
-- signal older than 365 days: -30
-- signal 180–365 days: -15
+- historical positive evidence is never negatively weighted for age
+- recency is represented by one opportunity-level urgency bonus: +15 (0–180 days), +8 (181–365), +3 (366–730), +0 (>730 or unknown)
 - generic pharma activity only: -25
 - duplicate evidence from mirrored/syndicated page: contribution 0
 

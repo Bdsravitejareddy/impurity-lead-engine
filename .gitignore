@@ -11,3 +11,9 @@ exports/
 seeds/companies.csv
 
 supabase/.temp/
+
+web/node_modules/
+web/dist/
+outputs/
+.wrangler/
+test-results/

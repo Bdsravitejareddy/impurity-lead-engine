@@ -15,6 +15,28 @@ _STATUS_STRENGTH = {
     "STALE": 0,
 }
 
+# A publication, patent, or historical regulatory record can identify a useful
+# seed, but it cannot establish that the person still works at the company.
+# Current-role evidence must come from a source that can describe present
+# affiliation or a current professional route.
+_CURRENT_ROLE_SOURCES = {
+    "company_site",
+    "professional_profile",
+    "conference",
+    "company_press",
+    "company_pdf",
+    "association",
+    "registry",
+}
+
+
+def _has_current_role_evidence(person: ContactCandidate) -> bool:
+    return any(
+        item.source_type in _CURRENT_ROLE_SOURCES
+        and item.evidence_type in {"identity", "title", "affiliation"}
+        for item in person.evidence
+    )
+
 
 def _merge_people(candidates: list[ContactCandidate]) -> list[ContactCandidate]:
     merged: dict[str, ContactCandidate] = {}
@@ -60,7 +82,7 @@ def enrich_opportunity_contacts(
     trial_payloads: list[dict] | None = None,
     now: datetime | None = None,
 ) -> list[RankedContact]:
-    if opportunity.priority not in {"HOT", "HIGH"}:
+    if opportunity.score < 50:
         return []
     now = now or datetime.now(timezone.utc)
     candidates: list[ContactCandidate] = []
@@ -80,7 +102,7 @@ def enrich_contact_candidates(
     now: datetime | None = None,
 ) -> list[RankedContact]:
     """Rank checkpointed extracted candidates using the existing verification rules."""
-    if opportunity.priority not in {"HOT", "HIGH"}:
+    if opportunity.score < 50:
         return []
     now = now or datetime.now(timezone.utc)
     people = _merge_people(candidates)
@@ -97,6 +119,11 @@ def enrich_contact_candidates(
     verified: list[tuple[ContactCandidate, str]] = []
     for person in people:
         checked = apply_contact_verification(person, normalized_domain, confirmed_pattern, now)
+        # Historical authors/inventors/regulatory contacts remain discovery
+        # seeds, but are never emitted as current contacts without an
+        # independently current identity/title/affiliation source.
+        if not _has_current_role_evidence(checked):
+            continue
         source_type = checked.evidence[0].source_type if checked.evidence else None
         fit, rationale = score_role_fit(opportunity, checked, source_type=source_type)
         checked.role_fit_score = fit
@@ -109,9 +136,10 @@ def enrich_contact_candidates(
 
     verified.sort(
         key=lambda item: (
-            -_STATUS_STRENGTH[item[0].email_status],
+            -int(_has_current_role_evidence(item[0])),
             -item[0].role_fit_score,
             -item[0].contact_confidence,
+            -_STATUS_STRENGTH[item[0].email_status],
             item[0].normalized_name,
         )
     )

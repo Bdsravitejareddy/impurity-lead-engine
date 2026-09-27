@@ -17,7 +17,9 @@ RULES = (
     Rule("genotoxic_impurity", ("genotoxic impurity", "ich m7"), 40, 18, "genotoxic impurity"),
     Rule("impurity_characterization", ("impurity characterization", "impurity isolation", "structure elucidation"), 38, 15, "impurity characterization"),
     Rule("degradation_product", ("degradation product", "degradation impurity"), 35, 15, "degradation impurity"),
-    Rule("stability", ("forced degradation", "stability-indicating", "stability study"), 18, 8, "stability/degradation"),
+    Rule("stability", ("forced degradation", "stability-indicating", "stability study",
+                        "long-term stability storage", "stability storage conditions", "accelerated stability"),
+         18, 8, "stability/degradation"),
     Rule("method_validation", ("method validation", "analytical method development"), 12, 5, "analytical development"),
 )
 
