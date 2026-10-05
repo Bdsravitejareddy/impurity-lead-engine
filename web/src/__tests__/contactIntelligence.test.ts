@@ -1,10 +1,50 @@
 import { describe, expect, it } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { dedupeSources, normalizeContactIntelligence, sourceCoverage, researchCompleteness, personSummary, extractProfessionalProfile, researchQueries, extractPdfText, isSuspiciousExtractedField, inferProfileJtbd, inferProfilePersona, inferProfileProblems } from '../data/contactIntelligence'
+import { dedupeSources, normalizeContactIntelligence, sourceCoverage, researchCompleteness, personSummary, contactOverview, extractProfessionalProfile, researchQueries, extractPdfText, isSuspiciousExtractedField, inferProfileJtbd, inferProfilePersona, inferProfileProblems } from '../data/contactIntelligence'
 import { normalizeProfileRows, profileSourceKey } from '../data/profilePersistence'
 
 describe('contact intelligence normalization', () => {
+  it('turns a noisy stored professional profile into a brief, evidence-grounded overview', () => {
+    const intel = normalizeContactIntelligence('c1', {
+      sources: [{contact_id:'c1', url:'manual://c1', status:'USED', source_type:'PROFESSIONAL_PROFILE'}],
+      positions: [{contact_id:'c1', title:'Head - Indoco Analytical Solutions', company_name:'Indoco Remedies Ltd'}],
+      education: [], works: [], problems: [],
+      themes: ['analytical', 'quality', 'impurity', 'API', 'CMC', 'method validation'].map(theme => ({contact_id:'c1', theme, evidence_count:1})),
+      jtbd: [{contact_id:'c1', statement:'Define and maintain analytical methods for identity, purity, impurities and degradation products.', provenance:'INFERRED'}],
+      claims: [
+        {contact_id:'c1', provenance:'OBSERVED', claim_text:'Current title: Indoco Remedies Ltd'},
+        {contact_id:'c1', provenance:'OBSERVED', claim_text:'Professional summary: Experienced Head in pharmaceuticals. Skilled in method development, HPLC and impurity characterization. Accessibility Talent Solutions Privacy & Terms Messaging'},
+        {contact_id:'c1', provenance:'OBSERVED', claim_text:'Professional summary: Experienced Head in pharmaceuticals. Skilled in method development, HPLC and impurity characterization. Accessibility Talent Solutions Privacy & Terms Messaging'},
+        {contact_id:'c1', provenance:'OBSERVED', claim_text:'Explicit professional skills: HPLC, Endorsed by 25 colleagues, Clinical Psychology, Method Validation'},
+      ], notes: [], history: [], conflicts: [], researchRuns: [],
+    })
+    const overview = contactOverview(intel, {name:'Dr. Amit Gosar', title:'Head - Indoco Analytical Solutions', function:'Analytical R&D'}, 'Indoco Remedies Ltd')
+    expect(overview.summary.length).toBeLessThan(400)
+    expect(overview.summary).toContain('Head - Indoco Analytical Solutions')
+    expect(overview.observed).toEqual(expect.arrayContaining([expect.stringMatching(/method development/i), expect.stringMatching(/HPLC/i)]))
+    expect(overview.observed.length).toBeLessThanOrEqual(3)
+    expect(overview.inferred.length).toBeLessThanOrEqual(2)
+    expect(JSON.stringify(overview)).not.toMatch(/Accessibility|Messaging|Endorsed by|Clinical Psychology|Current title: Indoco|Privacy & Terms/i)
+  })
+  it('does not present inferred role problems as observed contact needs', () => {
+    const intel = normalizeContactIntelligence('c1', {sources:[{contact_id:'c1',url:'manual://c1',status:'USED',source_type:'PROFESSIONAL_PROFILE'}],positions:[],education:[],works:[],problems:[{contact_id:'c1',problem:'controlling impurities and degradation products',attribution:'FUNCTIONAL'}],themes:[],jtbd:[],claims:[{contact_id:'c1',claim_text:'Professional headline: Vice President - Analytical Research',provenance:'OBSERVED'}],notes:[],history:[],conflicts:[],researchRuns:[]})
+    const overview = contactOverview(intel,{name:'Dr. Amit Gosar',title:'Head - Indoco Analytical Solutions'},'Indoco Remedies Ltd')
+    expect(overview.observed.join(' ')).not.toMatch(/controlling impurities/i)
+    expect(overview.summary).not.toMatch(/controlling impurities/i)
+    expect(overview.unknown.join(' ')).toMatch(/current impurity.*requirement/i)
+  })
+  it('keeps explicit quality and regulatory skills visible for contacts outside analytical R&D', () => {
+    const intel = normalizeContactIntelligence('c1', {sources:[{contact_id:'c1',url:'manual://c1',status:'USED',source_type:'PROFESSIONAL_PROFILE'}],positions:[],education:[],works:[],problems:[],themes:[],jtbd:[],claims:[{contact_id:'c1',claim_text:'Explicit professional skills: Quality assurance, GMP, regulatory submissions',provenance:'OBSERVED'}],notes:[],history:[],conflicts:[],researchRuns:[]})
+    const overview = contactOverview(intel,{name:'Asha Rao',title:'Quality Director'},'Cipla')
+    expect(overview.observed).toEqual(['Quality assurance', 'GMP', 'Regulatory submissions'])
+  })
+  it('stops profile summaries at pasted page controls and derives themes only from extracted profile content', () => {
+    const profile = extractProfessionalProfile(`Dr. Amit Gosar\nVice President - Analytical Research\nAbout\nLeads method development and HPLC work. Mobile Small Business Questions? Manage your account and privacy Select language English\nExperience\nIndoco Remedies Ltd\nVice President - Analytical Research\nMay 2008 - Present\nSkills\nHPLC\nAccessibility Talent Solutions Quality CMC Nitrosamine`, 'Dr. Amit Gosar')
+    expect(profile.about).toBe('Leads method development and HPLC work.')
+    expect(profile.claims.join(' ')).not.toMatch(/Mobile Small Business|Manage your account|Accessibility Talent Solutions/i)
+    expect(profile.themes).not.toEqual(expect.arrayContaining(['CMC', 'nitrosamine']))
+  })
   it('deduplicates a source URL while retaining status', () => {
     const rows = dedupeSources([{ url: 'https://example.com', status: 'INSPECTED', source_type: 'web' }, { url: 'https://example.com', status: 'USED', source_type: 'web' }])
     expect(rows).toHaveLength(1)
@@ -33,6 +73,10 @@ describe('contact intelligence normalization', () => {
   it('recognizes a deep profile from category coverage rather than row count', () => {
     const intel = normalizeContactIntelligence('v', {sources: [{contact_id:'v',url:'a',status:'USED',source_type:'Professional profile'},{contact_id:'v',url:'b',status:'USED',source_type:'Official company'}], positions: [{contact_id:'v',title:'Global Head'} ,{contact_id:'v',title:'VP'}], education: [{contact_id:'v',degree:'MSc'}], works: [{contact_id:'v',attribution:'PERSON_DIRECT'},{contact_id:'v',attribution:'COMPANY_CONTEXT'}], problems: [{contact_id:'v',problem:'Quality'}], themes: [{contact_id:'v',theme:'Quality'}], jtbd: [{contact_id:'v',statement:'Investigate impurities'}], claims: [{contact_id:'v',provenance:'OBSERVED',claim_text:'Current'}], notes: [], history: [], conflicts: [], researchRuns: [{contact_id:'v',status:'COMPLETED'}]})
     expect(researchCompleteness(intel, {profile_url:'p', email:null, phone:null})).toMatchObject({state: 'DEEP PROFILE'})
+  })
+  it('does not call a profile deep when broad categories come from limited person-specific research', () => {
+    const intel = normalizeContactIntelligence('c1', {sources:[{contact_id:'c1',url:'a',status:'USED',source_type:'PROFESSIONAL_PROFILE'},{contact_id:'c1',url:'b',status:'USED',source_type:'OFFICIAL_COMPANY'}],positions:[{contact_id:'c1',title:'Head'},{contact_id:'c1',title:'Manager'}],education:[{contact_id:'c1',degree:'MBA'}],works:[{contact_id:'c1',attribution:'COMPANY_CONTEXT'}],problems:[{contact_id:'c1',problem:'Impurity control',attribution:'FUNCTIONAL'}],themes:[{contact_id:'c1',theme:'analytical'}],jtbd:[{contact_id:'c1',statement:'Review analytical methods',provenance:'INFERRED'}],claims:[{contact_id:'c1',claim_text:'Professional summary: Analytical leader',provenance:'OBSERVED'}],notes:[],history:[],conflicts:[],researchRuns:[{contact_id:'c1',status:'PARTIAL',sources_failed:20}]})
+    expect(researchCompleteness(intel,{profile_url:'p'}).state).toBe('RESEARCHED')
   })
   it('extracts observed profile facts and useful research queries from supplied text', () => {
     const profile = extractProfessionalProfile('Keisuke Inoue\nSenior Director, Site Quality Head\nTakeda Pharmaceuticals\nTokyo, Japan\n2018 – Present: Site Quality at Takeda\nMSc Chemistry from Kyoto University\nPresented a conference on analytical method validation and stability.', 'Keisuke Inoue')

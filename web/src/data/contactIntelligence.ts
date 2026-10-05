@@ -3,7 +3,7 @@ export type ContactSource = { id?: string; url: string; title?: string; publishe
 export type ContactIntelligence = { sources: ContactSource[]; positions: any[]; education: any[]; works: any[]; problems: any[]; themes: any[]; jtbd: any[]; persona: any[]; claims: any[]; notes: any[]; history: any[]; conflicts: any[]; researchRuns: any[] }
 // Bump when extraction or derived profile persistence changes so re-pasting an
 // unchanged source still repairs rows written by an older parser.
-export const PROFILE_PARSER_VERSION = '7'
+export const PROFILE_PARSER_VERSION = '8'
 
 const roleJtbdTemplates: Record<string, string[]> = {
   analytical: [
@@ -180,7 +180,7 @@ function isLikelyDegree(line: string) { return /\b(?:M\.?\s*(?:Sc|Pharm|Tech|Eng
 function sectionLines(sections: Record<string,string[]>, key: string) { return (sections[key] || []).filter(line => !uiNoise.test(line) && !profileFooter.test(line) && line.length > 1) }
 function cleanAbout(value: string | undefined): string | undefined {
   if (!value) return undefined
-  const cleaned = value.split(/\b(?:Accessibility|Talent Solutions|Community Guidelines|Careers|Marketing Solutions|Privacy & Terms|Ad Choices|Advertising|Sales Solutions|LinkedIn Corporation)\b/i)[0]
+  const cleaned = value.split(/\b(?:Accessibility|Talent Solutions|Community Guidelines|Careers|Marketing Solutions|Privacy & Terms|Ad Choices|Advertising|Sales Solutions|LinkedIn Corporation|Mobile Small Business|Safety Center|Questions\? Visit our Help Center|Manage your account and privacy|Select language|MessagingYou are on the messaging overlay)\b/i)[0]
     .replace(/\s+/g, ' ').trim()
   return cleaned.length >= 20 ? cleaned.slice(0, 700) : undefined
 }
@@ -283,9 +283,10 @@ export function extractProfessionalProfile(text: string, name = ''): ProfileExtr
   const activities = parseWorkSection(sectionLines(sections, 'ACTIVITY'), 'PROFESSIONAL_ACTIVITY')
   const recommendations = parseRecommendations(sectionLines(sections, 'RECOMMENDATIONS'))
   const works = [...projects, ...publications, ...patents, ...activities]
-  const skills = sectionLines(sections, 'SKILLS').flatMap(x => x.split(/,|•|;/).map(y => y.trim())).filter(x => x.length > 1 && x.length < 100 && !noisySkill.test(x)).slice(0, 40)
+  const skills = sectionLines(sections, 'SKILLS').flatMap(x => x.split(/,|•|;/).map(y => y.trim())).filter(x => x.length > 1 && x.length < 100 && !profileFooter.test(x) && !noisySkill.test(x)).slice(0, 40)
   const profileClaims = [headline && `Professional headline: ${headline}`, currentTitle && `Current title: ${currentTitle}`, currentCompany && `Current company: ${currentCompany}`, location && `Professional location: ${location}`, about && `Professional summary: ${about.slice(0, 600)}`, skills.length && `Explicit professional skills: ${skills.slice(0, 12).join(', ')}`, certifications.length && `Certifications supplied: ${certifications.map(c => c.name).join(', ')}`, recommendations.length && `Professional recommendations received from: ${recommendations.map(item => item.name).join(', ')}`].filter(Boolean) as string[]
-  const themes = ['analytical development','analytical','quality','quality control','quality assurance','CMC','stability','degradation','impurity','regulatory','process development','API','method validation','nitrosamine','respiratory','data integrity'].filter(t => text.toLowerCase().includes(t.toLowerCase()))
+  const thematicText = [headline, currentTitle, about, ...positions.flatMap(position => [position.title, position.description]), ...skills, ...works.map(work => work.title)].filter(Boolean).join(' ').toLowerCase()
+  const themes = ['analytical development','analytical','quality','quality control','quality assurance','CMC','stability','degradation','impurity','regulatory','process development','API','method validation','nitrosamine','respiratory','data integrity'].filter(t => new RegExp(`\\b${t}\\b`, 'i').test(thematicText))
   const keywords = [...new Set([suppliedName, currentCompany, currentTitle, location, ...themes, ...skills.slice(0, 10)].filter(Boolean).flatMap(x => String(x).split(/\s+/).filter(w => w.length > 3)))].slice(0, 80)
   if (!text.trim()) warnings.push('No machine-readable profile text was found.')
   if (!positions.length) warnings.push('No dated experience positions were detected.')
@@ -371,22 +372,44 @@ export function researchCompleteness(intel: ContactIntelligence, contact: { prof
     new Set(intel.sources.map(s => s.source_type)).size >= 2,
   ]
   const score = Math.round(dimensions.filter(Boolean).length / dimensions.length * 100)
-  const state: ResearchState = used === 0 && claims === 0 ? 'UNRESEARCHED' : score >= 75 && dimensions.filter(Boolean).length >= 9 ? 'DEEP PROFILE' : score >= 50 ? 'RESEARCHED' : 'PARTIAL'
+  const independentUsedSources = new Set(intel.sources.filter(source => source.status === 'USED').map(source => source.source_type)).size >= 2
+  const personWorkVerified = intel.works.some(work => work.attribution === 'PERSON_DIRECT')
+  const completedResearch = intel.researchRuns.some(run => run.status === 'COMPLETED')
+  const state: ResearchState = used === 0 && claims === 0 ? 'UNRESEARCHED' : score >= 75 && dimensions.filter(Boolean).length >= 9 && independentUsedSources && personWorkVerified && completedResearch ? 'DEEP PROFILE' : score >= 50 ? 'RESEARCHED' : 'PARTIAL'
   return { score, state, dimensionsCovered: dimensions.filter(Boolean).length, dimensionsTotal: dimensions.length }
 }
-export function personSummary(intel: ContactIntelligence, contact: { name: string; title?: string | null; function?: string | null }, company: string) {
+const overviewTechnicalTerms: [RegExp, string][] = [
+  [/\bmethod development\b/i, 'Method development'],
+  [/\bimpurity (?:profiling|characterization|characterisation)\b/i, 'Impurity characterization'],
+  [/\bHPLC\b/i, 'HPLC'],
+  [/\bmethod validation\b|\bverification and validation\b/i, 'Method validation'],
+  [/\bLC-MS\b|\bliquid chromatography.mass spectrometry\b/i, 'LC-MS'],
+  [/\bstability testing\b/i, 'Stability testing'],
+  [/\bextractable(?:s)?\s*(?:&|and)\s*leachable(?:s)?\b/i, 'Extractables and leachables'],
+  [/\banalytical development\b/i, 'Analytical development'],
+  [/\bquality assurance\b/i, 'Quality assurance'],
+  [/\bGMP\b|\bgood manufacturing practice\b/i, 'GMP'],
+  [/\bregulatory submissions?\b/i, 'Regulatory submissions'],
+  [/\bprocess development\b/i, 'Process development'],
+  [/\bpolymorph(?:ism|s)?\b/i, 'Polymorphism'],
+  [/\bGLP\b|\bgood laboratory practice\b/i, 'GLP'],
+]
+
+export function contactOverview(intel: ContactIntelligence, contact: { name: string; title?: string | null; function?: string | null }, company: string) {
   const completeness = researchCompleteness(intel, contact)
-  if (completeness.state === 'UNRESEARCHED') return 'Not enough verified evidence is available to generate a person-level briefing yet.'
-  const observedClaims = intel.claims.filter(c => c.provenance === 'OBSERVED').map(c => String(c.claim_text || '')).filter(Boolean)
-  const summaryClaim = observedClaims.find(c => /^professional summary:/i.test(c))
-  const headlineClaim = observedClaims.find(c => /^professional headline:/i.test(c))
-  const observed = [headlineClaim, summaryClaim].filter(Boolean).map(c => String(c).replace(/^[^:]+:\s*/, '')).join(' ')
-  const roles = intel.positions.slice(0, 5).map(p => [p.title, p.company_name].filter(Boolean).join(' at ')).join('; ')
-  const direct = intel.works.filter(w => w.attribution === 'PERSON_DIRECT').map(w => w.title).join('; ')
-  const companyWork = intel.works.filter(w => w.attribution !== 'PERSON_DIRECT').map(w => w.title).join('; ')
-  const problems = intel.problems.map(p => p.problem).join('; ')
-  const themes = intel.themes.map(t => t.theme).join(', ')
-  const jtbd = intel.jtbd.slice(0, 3).map(j => j.statement).join('; ')
-  const persona = (intel.persona || []).slice(0, 2).map(item => String(item.claim_text || '').split(/\s+Anchored observations:/i)[0]).filter(Boolean).join(' ')
-  return `${contact.name} is publicly described as ${contact.title || 'a professional contact'} at ${company}${contact.function ? `, working in ${contact.function}` : ''}. ${observed ? `The supplied profile describes ${observed}` : ''} ${roles ? `Documented career history includes ${roles}.` : ''} ${intel.education.length ? `Public education records include ${intel.education.slice(0, 3).map(e => [e.degree, e.institution].filter(Boolean).join(' at ')).join('; ')}.` : ''} ${direct ? `Person-direct technical work includes ${direct}.` : 'No person-specific technical publication, patent or project has been independently verified.'} ${companyWork ? `Organisational context includes ${companyWork}; this does not establish personal authorship.` : ''} ${problems ? `Role-related problem areas are ${problems}.` : ''} ${themes ? `Professional themes include ${themes}.` : ''} ${jtbd ? `Inferred JTBD hypotheses include ${jtbd}.` : ''} ${persona ? `Persona hypotheses include ${persona}` : ''} Current priorities, active projects, supplier preferences and purchase requirements remain unknown.`
+  if (completeness.state === 'UNRESEARCHED') return {summary:'Not enough verified evidence is available to generate a person-level briefing yet.', observed:[], inferred:[], unknown:[]}
+  const technicalClaims = intel.claims
+    .filter(claim => claim.provenance === 'OBSERVED' && /^(?:professional summary|explicit professional skills):/i.test(String(claim.claim_text || '')))
+    .map(claim => String(claim.claim_text || '').split(/\b(?:Accessibility|Mobile Small Business|Privacy & Terms|MessagingYou are on the messaging overlay|Endorsed by)\b/i)[0])
+    .join(' ')
+  const observed = overviewTechnicalTerms.filter(([pattern]) => pattern.test(technicalClaims)).map(([, label]) => label).slice(0, 3)
+  const role = [contact.title || 'a professional contact', company].filter(Boolean).join(' at ')
+  const summary = `${contact.name} is listed as ${role}${contact.function ? ` in ${contact.function}` : ''}. ${observed.length ? `Supplied profile evidence mentions ${observed.join(', ')}.` : 'Specific technical work has not yet been verified.'}`
+  const inferred = [...new Set(intel.jtbd.filter(item => item.provenance === 'INFERRED').map(item => String(item.statement || '').trim()).filter(item => item.length > 15 && item.length < 170 && !profileFooter.test(item)))].slice(0, 2)
+  const unknown = ['Whether there is a current impurity or reference-standard requirement.', 'Whether external support is approved or budgeted.']
+  return {summary, observed, inferred, unknown}
+}
+
+export function personSummary(intel: ContactIntelligence, contact: { name: string; title?: string | null; function?: string | null }, company: string) {
+  return contactOverview(intel, contact, company).summary
 }
