@@ -39,6 +39,12 @@ describe('contact intelligence normalization', () => {
     const overview = contactOverview(intel,{name:'Asha Rao',title:'Quality Director'},'Cipla')
     expect(overview.observed).toEqual(['Quality assurance', 'GMP', 'Regulatory submissions'])
   })
+  it('uses person-specific work when a profile has no recognized skills', () => {
+    const intel = normalizeContactIntelligence('c1', {sources:[{contact_id:'c1',url:'https://example.test/study',status:'USED',source_type:'PUBLICATION'}],positions:[],education:[],works:[{contact_id:'c1',title:'Stability-indicating method for alogliptin',attribution:'PERSON_DIRECT'}],problems:[],themes:[],jtbd:[],claims:[],notes:[],history:[],conflicts:[],researchRuns:[]})
+    const overview = contactOverview(intel,{name:'Asha Rao',title:'Scientist'},'Cipla')
+    expect(overview.observed.join(' ')).toContain('Stability-indicating method for alogliptin')
+    expect(overview.summary).not.toMatch(/technical work has not yet been verified/i)
+  })
   it('stops profile summaries at pasted page controls and derives themes only from extracted profile content', () => {
     const profile = extractProfessionalProfile(`Dr. Amit Gosar\nVice President - Analytical Research\nAbout\nLeads method development and HPLC work. Mobile Small Business Questions? Manage your account and privacy Select language English\nExperience\nIndoco Remedies Ltd\nVice President - Analytical Research\nMay 2008 - Present\nSkills\nHPLC\nAccessibility Talent Solutions Quality CMC Nitrosamine`, 'Dr. Amit Gosar')
     expect(profile.about).toBe('Leads method development and HPLC work.')

@@ -403,8 +403,10 @@ export function contactOverview(intel: ContactIntelligence, contact: { name: str
     .map(claim => String(claim.claim_text || '').split(/\b(?:Accessibility|Mobile Small Business|Privacy & Terms|MessagingYou are on the messaging overlay|Endorsed by)\b/i)[0])
     .join(' ')
   const observed = overviewTechnicalTerms.filter(([pattern]) => pattern.test(technicalClaims)).map(([, label]) => label).slice(0, 3)
+  const directWork = intel.works.find(work => work.attribution === 'PERSON_DIRECT' && typeof work.title === 'string' && work.title.length >= 12 && work.title.length <= 90 && !profileFooter.test(work.title) && !isSuspiciousExtractedField(work.title))
+  if (directWork && observed.length < 3) observed.push(`Person-specific work: ${directWork.title}`)
   const role = [contact.title || 'a professional contact', company].filter(Boolean).join(' at ')
-  const summary = `${contact.name} is listed as ${role}${contact.function ? ` in ${contact.function}` : ''}. ${observed.length ? `Supplied profile evidence mentions ${observed.join(', ')}.` : 'Specific technical work has not yet been verified.'}`
+  const summary = `${contact.name} is listed as ${role}${contact.function ? ` in ${contact.function}` : ''}. ${observed.length ? `Available evidence mentions ${observed.join(', ')}.` : 'No concise technical evidence is available for this briefing.'}`
   const inferred = [...new Set(intel.jtbd.filter(item => item.provenance === 'INFERRED').map(item => String(item.statement || '').trim()).filter(item => item.length > 15 && item.length < 170 && !profileFooter.test(item)))].slice(0, 2)
   const unknown = ['Whether there is a current impurity or reference-standard requirement.', 'Whether external support is approved or budgeted.']
   return {summary, observed, inferred, unknown}
