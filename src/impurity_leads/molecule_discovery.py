@@ -28,7 +28,7 @@ from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from impurity_leads.contacts.normalize import normalize_person_name, person_name_compatibility
-from impurity_leads.normalize import clean_intervention_names, normalize_company_name
+from impurity_leads.normalize import clean_intervention_names
 from impurity_leads.person_discovery import PersonCandidate, extract_authors, rank_candidate
 from impurity_leads.research_discovery import EuropePmcProvider, SearchRequest
 from impurity_leads.zero_cost import ProviderUsage, provider_for_url
@@ -83,7 +83,9 @@ def _words(value: str) -> list[str]:
 
 def company_tokens(company: str) -> list[str]:
     """Distinctive words of a company name ("Dr. Reddy's Laboratories" -> ["reddy"])."""
-    words = [word for word in _words(normalize_company_name(company or "")) if word not in _GENERIC_COMPANY_WORDS]
+    # Tokenize the raw name the same way as affiliations: normalize_company_name
+    # drops apostrophes, so "Reddy's" would become "reddys" and never match.
+    words = [word for word in _words(company or "") if word not in _GENERIC_COMPANY_WORDS]
     distinctive = [word for word in words if len(word) >= 3]
     return distinctive or words[:1]
 

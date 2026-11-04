@@ -51,3 +51,30 @@ def test_phase_two_three_trial_uses_latest_phase_and_clean_names():
     records = ClinicalTrialsAdapter().parse(_study(phases=("PHASE2", "PHASE3"), interventions=(("DRUG", "Abrocitinib 100 mg"), ("DRUG", "Abrocitinib 200 mg"))))
     assert [record.molecule_name_raw for record in records] == ["Abrocitinib"]
     assert records[0].metadata_json["phase"] == "PHASE3"
+
+
+def _with_other_names(*interventions):
+    study = _study()
+    study["protocolSection"]["armsInterventionsModule"]["interventions"] = [
+        {"type": "DRUG", "name": name, "otherNames": list(other)} for name, other in interventions]
+    return study
+
+
+def test_obvious_biologics_entered_as_drug_are_dropped():
+    study = _study(interventions=(("DRUG", "Pembrolizumab"), ("DRUG", "Aflibercept 2 mg"), ("DRUG", "Insulin glargine"),
+                                  ("DRUG", "Semaglutide"), ("DRUG", "Trastuzumab deruxtecan"), ("DRUG", "Epoetin alfa"),
+                                  ("DRUG", "Filgrastim"), ("DRUG", "Tisagenlecleucel"), ("DRUG", "Abrocitinib")))
+    assert [record.molecule_name_raw for record in ClinicalTrialsAdapter().parse(study)] == ["Abrocitinib"]
+
+
+def test_development_codes_map_to_their_nonproprietary_name():
+    study = _with_other_names(("BAY 94-8862", ["Kerendia", "finerenone"]), ("AZD1234", ["Brandix"]), ("EX-101", []))
+    records = ClinicalTrialsAdapter().parse(study)
+    assert [record.molecule_name_raw for record in records] == ["finerenone", "Brandix", "EX-101"]
+    assert records[0].metadata_json["development_code"] == "BAY 94-8862"
+    assert "development_code" not in records[2].metadata_json
+
+
+def test_development_code_for_a_biologic_is_dropped():
+    study = _with_other_names(("MK-3475", ["pembrolizumab", "Keytruda"]), ("ABC-123", ["abcitinib"]))
+    assert [record.molecule_name_raw for record in ClinicalTrialsAdapter().parse(study)] == ["abcitinib"]

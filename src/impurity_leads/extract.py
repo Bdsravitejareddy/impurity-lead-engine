@@ -13,8 +13,14 @@ def extract_quantities(text: str) -> list[str]:
 
 
 def extract_evidence_windows(text: str, phrases: list[str], window: int = 180) -> list[str]:
+    return [snippet for snippet, _ in extract_evidence_windows_at(text, phrases, window)]
+
+
+def extract_evidence_windows_at(text: str, phrases: list[str], window: int = 180) -> list[tuple[str, int]]:
+    """Evidence windows with the offset of the phrase that produced each one."""
     lowered = text.lower()
-    output: list[str] = []
+    output: list[tuple[str, int]] = []
+    seen: set[str] = set()
     for phrase in phrases:
         start = 0
         needle = phrase.lower()
@@ -25,7 +31,8 @@ def extract_evidence_windows(text: str, phrases: list[str], window: int = 180) -
             left = max(0, index - window)
             right = min(len(text), index + len(needle) + window)
             snippet = re.sub(r"\s+", " ", text[left:right]).strip()
-            if snippet not in output:
-                output.append(snippet)
+            if snippet not in seen:
+                seen.add(snippet)
+                output.append((snippet, index))
             start = index + len(needle)
     return output

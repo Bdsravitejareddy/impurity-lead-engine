@@ -3,6 +3,7 @@ import threading
 
 from impurity_leads.execution.retry import DatabaseUnavailable
 from impurity_leads.execution.tasks import validate_payload
+from impurity_leads.storage.supabase_store import company_alias_map, load_company_rows
 
 
 class SupabaseTaskStore:
@@ -50,6 +51,11 @@ class SupabaseTaskStore:
     def publish(self,task,rows,checkpoint):
         validate_payload(checkpoint)
         return self._rpc('crawl_publish',p_task_id=task['id'],p_token=task['lease_token'],p_coordinator_token=self.run['coordinator_token'],p_rows=rows,p_checkpoint=checkpoint)
+    def company_aliases(self):
+        try:
+            return company_alias_map(load_company_rows(self.client))
+        except Exception:
+            raise DatabaseUnavailable('execution_store_unavailable') from None
     def snapshot(self):
         return self.tasks(summary=True)
     def tasks(self, summary=False):

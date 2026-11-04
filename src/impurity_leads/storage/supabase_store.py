@@ -11,23 +11,79 @@ def _stable_uuid(kind: str, value: str) -> UUID:
     return uuid5(NAMESPACE_URL, f"impurity-leads:{kind}:{value}")
 
 
+def company_alias_map(rows: list[dict]) -> dict[str, tuple[str, str]]:
+    """Map current normalization keys to the stored company row that owns them.
+
+    Company ids derive from the normalized name, so a stricter normalization
+    gives "Bayer AG" a new key ("bayer"). Existing rows are re-keyed and every
+    key resolves through ``merged_into_company_id`` to its survivor, returned
+    as ``(id, stored normalized_name)``. When several unmerged rows share a key
+    (the normalization migration has not run yet) the row whose id the key
+    itself derives from wins, then the lowest id.
+    """
+    by_id = {str(row["id"]): row for row in rows if row.get("id")}
+
+    def survivor(company_id: str) -> str:
+        seen = {company_id}
+        while (parent := by_id.get(company_id, {}).get("merged_into_company_id")) and str(parent) in by_id and str(parent) not in seen:
+            company_id = str(parent)
+            seen.add(company_id)
+        return company_id
+
+    owners: dict[str, list[str]] = {}
+    for company_id, row in by_id.items():
+        key = normalize_company_name(str(row.get("normalized_name") or row.get("legal_name") or ""))
+        if key:
+            owners.setdefault(key, []).append(survivor(company_id))
+    aliases: dict[str, tuple[str, str]] = {}
+    for key, ids in owners.items():
+        own_id = str(_stable_uuid("company", key))
+        chosen = own_id if own_id in ids else min(ids)
+        aliases[key] = (chosen, str(by_id[chosen].get("normalized_name") or key))
+    return aliases
+
+
+def load_company_rows(client, page_size: int = 1000) -> list[dict]:
+    rows: list[dict] = []
+    while True:
+        batch = (
+            client.table("companies").select("id,normalized_name,legal_name,merged_into_company_id")
+            .range(len(rows), len(rows) + page_size - 1).execute().data or []
+        )
+        rows.extend(batch)
+        if len(batch) < page_size:
+            return rows
+
+
 class SupabaseLeadStore:
-    def __init__(self, client):
+    def __init__(self, client, company_aliases: dict[str, tuple[str, str]] | None = None):
         self.client = client
         self._contact_aliases: dict[tuple[str, str], str] = {}
+        self._company_aliases = company_aliases
+
+    def _company_aliases_map(self) -> dict[str, tuple[str, str]]:
+        if self._company_aliases is None:
+            table = self.client.table("companies")
+            try:
+                self._company_aliases = company_alias_map(load_company_rows(self.client)) if hasattr(table, "select") else {}
+            except Exception:
+                self._company_aliases = {}
+        return self._company_aliases
+
+    def _resolve_company(self, company_name: str) -> tuple[str, str, bool]:
+        normalized = normalize_company_name(company_name)
+        existing = self._company_aliases_map().get(normalized)
+        if existing:
+            return existing[0], existing[1], True
+        return str(_stable_uuid("company", normalized)), normalized, False
 
     def _company_id(self, company_name: str) -> str:
-        normalized = normalize_company_name(company_name)
-        company_id = str(_stable_uuid("company", normalized))
-        self.client.table("companies").upsert(
-            {
-                "id": company_id,
-                "normalized_name": normalized,
-                "legal_name": company_name,
-                "last_seen_at": datetime.now(timezone.utc).isoformat(),
-            },
-            on_conflict="id",
-        ).execute()
+        company_id, normalized, existing = self._resolve_company(company_name)
+        row = {"id": company_id, "normalized_name": normalized, "last_seen_at": datetime.now(timezone.utc).isoformat()}
+        if not existing:
+            row["legal_name"] = company_name
+        # A stored row keeps its key (normalized_name is unique) and display name.
+        self.client.table("companies").upsert(row, on_conflict="id").execute()
         return company_id
 
     def _molecule_id(self, molecule_name: str) -> str:
@@ -165,7 +221,7 @@ class SupabaseLeadStore:
         return self._contact_id(company_id, normalized), normalized
 
     def _opportunity_id(self, opportunity: Opportunity) -> str:
-        company_id = str(_stable_uuid("company", normalize_company_name(opportunity.company_name)))
+        company_id = self._resolve_company(opportunity.company_name)[0]
         molecule_id = str(_stable_uuid("molecule", normalize_molecule_name(opportunity.molecule_name)))
         return str(_stable_uuid("opportunity", f"{company_id}:{molecule_id}"))
 
