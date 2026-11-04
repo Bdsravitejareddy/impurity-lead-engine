@@ -1,6 +1,7 @@
 """Small durable adapters around the existing extraction and scoring code."""
 from contextlib import nullcontext
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import httpx
 from impurity_leads.adapters.clinical_trials import ClinicalTrialsAdapter
@@ -13,12 +14,16 @@ from impurity_leads.contacts.extract import extract_contacts_from_html
 from impurity_leads.contacts.models import ContactCandidate
 from impurity_leads.contacts.pipeline import enrich_contact_candidates
 from impurity_leads.crawling.robots import RobotsPolicy
-from impurity_leads.crawling.sitemap import extract_sitemap_urls
+from impurity_leads.crawling.sitemap import parse_sitemap
 from impurity_leads.execution.http import CrawlClient, HostGate
 from impurity_leads.execution.retry import TaskFailure, classify_error, DatabaseUnavailable, InterruptedTask
 from impurity_leads.models import Opportunity
 from impurity_leads.seeds import relevant_candidate_urls
 from impurity_leads.zero_cost import ProviderUsage
+
+
+# Each child sitemap costs a paced request; the newest ones carry current pages.
+MAX_CHILD_SITEMAPS = 5
 
 
 class CrawlHandlers:
@@ -69,15 +74,28 @@ class CrawlHandlers:
         else:
             response.raise_for_status();text=response.text
         return RobotsPolicy.from_text(text,base,self.settings.user_agent)
+    def _sitemap(self,client,url,policy,required=False):
+        if not policy.can_fetch(url):return None
+        response=client.get(url,headers={'User-Agent':self.settings.user_agent})
+        if response.status_code!=200:
+            if required and response.status_code not in {401,403,404,410}:response.raise_for_status()
+            return None
+        try:return parse_sitemap(response.content)
+        except Exception:return None
+    def _sitemap_urls(self,client,domain,policy):
+        """Root sitemap, or the newest children of a sitemap index (one level), newest pages first."""
+        root=self._sitemap(client,f'https://{domain}/sitemap.xml',policy,required=True)
+        if root is None:return []
+        if not root.is_index:return root.locations()
+        wanted=domain.lower().removeprefix('www.')
+        entries=[]
+        children=[u for u in root.locations() if (urlparse(u).hostname or '').removeprefix('www.')==wanted]
+        for child in children[:MAX_CHILD_SITEMAPS]:
+            sitemap=self._sitemap(client,child,policy)
+            if sitemap and not sitemap.is_index:entries.extend(sitemap.entries)
+        return type(root)(is_index=False,entries=tuple(entries)).locations()
     def _discovery(self,client,domain,policy,contact=False):
-        sitemap=[]
-        url=f'https://{domain}/sitemap.xml'
-        if policy.can_fetch(url):
-            response=client.get(url,headers={'User-Agent':self.settings.user_agent})
-            if response.status_code==200:
-                try:sitemap=extract_sitemap_urls(response.text)
-                except Exception:sitemap=[]
-            elif response.status_code not in {401,403,404,410}:response.raise_for_status()
+        sitemap=self._sitemap_urls(client,domain,policy)
         common=[]
         try:
             adapter=CommonCrawlAdapter(client=client,user_agent=self.settings.user_agent,

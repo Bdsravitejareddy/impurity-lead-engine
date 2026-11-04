@@ -81,3 +81,26 @@ def test_common_crawl_collection_list_is_fetched_once_per_run():
         handlers.company(Ctx());handlers.company(Ctx())
     assert sum(url.endswith('/collinfo.json') for url in calls)==1
     assert sum('CC-MAIN-2026-43-index' in url for url in calls)==2
+
+
+def test_sitemap_index_is_expanded_one_level_with_gzip_children_newest_first():
+    import gzip
+    fetched=[]
+    index=("<sitemapindex><sitemap><loc>https://example.com/old.xml</loc><lastmod>2024-01-01</lastmod></sitemap>"
+           "<sitemap><loc>https://example.com/news.xml.gz</loc><lastmod>2026-09-01</lastmod></sitemap>"
+           "<sitemap><loc>https://other.example/jobs.xml</loc></sitemap></sitemapindex>")
+    old="<urlset><url><loc>https://example.com/jobs/old</loc><lastmod>2024-01-01</lastmod></url></urlset>"
+    news=("<urlset><url><loc>https://example.com/jobs/new</loc><lastmod>2026-09-01</lastmod></url>"
+          "<url><loc>https://example.com/nested.xml</loc></url></urlset>")
+    def handler(req):
+        fetched.append(str(req.url))
+        if req.url.path=='/sitemap.xml':return httpx.Response(200,text=index)
+        if req.url.path=='/old.xml':return httpx.Response(200,text=old)
+        if req.url.path=='/news.xml.gz':return httpx.Response(200,content=gzip.compress(news.encode()),headers={'Content-Type':'application/x-gzip'})
+        return httpx.Response(404)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        handlers=CrawlHandlers(Settings(),client_factory=lambda ctx:client)
+        ctx=Ctx();handlers.company(ctx)
+    assert ctx.checkpoint['urls'][:2]==['https://example.com/jobs/new','https://example.com/jobs/old']
+    assert 'https://other.example/jobs.xml' not in fetched
+    assert 'https://example.com/nested.xml' not in fetched
