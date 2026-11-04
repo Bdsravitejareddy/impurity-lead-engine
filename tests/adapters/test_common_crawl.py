@@ -42,3 +42,30 @@ def test_domain_prefix_is_removed_as_a_prefix_not_a_character_set():
     records = [{"url": "https://w.ockhardt.com/careers/impurity"}, {"url": "https://www.wockhardt.com/careers/impurity"}]
     # lstrip("www.") stripped characters, so "w.ockhardt.com" matched "wockhardt.com".
     assert [r["url"] for r in filter_index_records(records, "wockhardt.com", ("careers",))] == ["https://www.wockhardt.com/careers/impurity"]
+
+
+class RecordingClient(FakeClient):
+    def __init__(self):
+        self.calls = []
+    def get(self, url, params=None, headers=None):
+        self.calls.append((url, params))
+        return super().get(url, params, headers)
+
+
+def test_cdx_query_is_bounded_html_only_and_collapsed():
+    from impurity_leads.adapters.common_crawl import CDX_LIMIT, CommonCrawlAdapter
+    client = RecordingClient()
+    CommonCrawlAdapter(client=client, sleep_fn=lambda _: None).discover("example.com")
+    params = client.calls[-1][1]
+    assert params["limit"] == CDX_LIMIT
+    assert params["collapse"] == "urlkey"
+    assert params["filter"] == ["status:200", "mime:text/html"]
+
+
+def test_collection_list_is_fetched_once_per_shared_cache():
+    from impurity_leads.adapters.common_crawl import CommonCrawlAdapter, IndexNameCache
+    client, cache, sleeps = RecordingClient(), IndexNameCache(), []
+    for domain in ("example.com", "example.org"):
+        CommonCrawlAdapter(client=client, sleep_fn=sleeps.append, index_cache=cache).discover(domain)
+    assert [url for url, _ in client.calls].count("https://index.commoncrawl.org/collinfo.json") == 1
+    assert cache.value == "CC-MAIN-2026-30" and sleeps == [1.0]

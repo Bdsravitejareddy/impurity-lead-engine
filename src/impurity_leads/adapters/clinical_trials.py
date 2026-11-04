@@ -4,7 +4,7 @@ from dateutil.parser import isoparse
 
 from impurity_leads.adapters.base import SourceAdapter
 from impurity_leads.models import SourceRecord
-from impurity_leads.normalize import clean_intervention_names
+from impurity_leads.normalize import clean_intervention_names, is_development_code, is_obvious_biologic, nonproprietary_name
 
 
 # Trials that will not run or whose outcome is unknown carry no sourcing demand.
@@ -51,14 +51,26 @@ class ClinicalTrialsAdapter(SourceAdapter):
             published_at = published_at.replace(tzinfo=timezone.utc)
 
         records: list[SourceRecord] = []
-        molecules: list[tuple[str, dict]] = []
+        molecules: list[tuple[str, dict, str | None]] = []
         for intervention in arms.get("interventions", []):
             if intervention.get("type") != "DRUG":
                 continue
-            for molecule in clean_intervention_names(intervention.get("name") or ""):
-                if molecule.casefold() not in {name.casefold() for name, _ in molecules}:
-                    molecules.append((molecule, intervention))
-        for molecule, intervention in molecules:
+            names = clean_intervention_names(intervention.get("name") or "")
+            others = [name for raw in intervention.get("otherNames") or [] for name in clean_intervention_names(raw)]
+            for molecule in names:
+                code = None
+                # Other names describe the whole intervention, so only a single coded product is mapped.
+                if len(names) == 1 and is_development_code(molecule):
+                    if any(is_obvious_biologic(name) for name in others):
+                        continue
+                    mapped = nonproprietary_name(others)
+                    if mapped:
+                        code, molecule = molecule, mapped
+                if is_obvious_biologic(molecule):
+                    continue
+                if molecule.casefold() not in {name.casefold() for name, _, _ in molecules}:
+                    molecules.append((molecule, intervention, code))
+        for molecule, intervention, code in molecules:
             signal_text = " ".join(
                 part for part in [
                     identification.get("briefTitle", ""),
@@ -82,6 +94,7 @@ class ClinicalTrialsAdapter(SourceAdapter):
                         "phase": phase,
                         "overall_status": status.get("overallStatus"),
                         "countries": countries,
+                        **({"development_code": code} if code else {}),
                     },
                 )
             )

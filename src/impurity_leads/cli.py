@@ -337,6 +337,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("status", help="show latest durable run (read-only)")
     export_run_parser = subparsers.add_parser("export-run", help="regenerate exports from a completed durable run")
     export_run_parser.add_argument("run_id", nargs="?", default=None)
+    rescore_parser = subparsers.add_parser("rescore-opportunities", help="rescore every stored opportunity from its persisted signals (dry run unless --apply)")
+    rescore_parser.add_argument("--apply", action="store_true", help="write the new scores")
     return parser
 
 
@@ -354,6 +356,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "export-run":
         from impurity_leads.execution.daily import export_run
         return export_run(load_settings(), _project_root(), args.run_id)
+    if args.command == "rescore-opportunities":
+        from impurity_leads.opportunity_rescore import run_stale_opportunity_rescore
+        result = run_stale_opportunity_rescore(load_settings(), qualified_before=None, apply=args.apply)
+        print(json.dumps(result, sort_keys=True, default=str))
+        return 0 if result["status"] == "COMPLETED" else 1
     raise AssertionError(f"Unhandled command: {args.command}")
 
 

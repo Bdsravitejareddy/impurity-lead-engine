@@ -208,3 +208,32 @@ def test_host_lock_covers_body_consumption_and_releases_on_interruption():
         first.join(2)
         second.join(2)
     assert second_sent.is_set() and errors == ["interrupted"]
+
+
+def test_host_crawl_delay_extends_pacing_for_that_host_only():
+    gate = HostGate(0)
+    gate.set_delay("https://www.example.com/robots.txt", 0.2)
+    gate.set_delay("https://capped.example/robots.txt", 10_000)
+    assert gate.delay_for("example.com") == 0.2 and gate.delay_for("other.example") == 0
+    assert gate.delay_for("capped.example") == HostGate.MAX_CRAWL_DELAY
+    with client(lambda request: httpx.Response(200), gate=gate) as crawler:
+        started = time.monotonic()
+        crawler.get("https://example.com/a")
+        crawler.get("https://other.example/a")
+        crawler.get("https://other.example/b")
+        assert time.monotonic() - started < .15
+        crawler.get("https://example.com/b")
+        assert time.monotonic() - started >= .2
+
+
+def test_robots_crawl_delay_is_applied_to_the_shared_gate():
+    from impurity_leads.execution.crawl import CrawlHandlers
+
+    def handler(request):
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text="User-agent: *\nCrawl-delay: 5\n")
+        return httpx.Response(404)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as http:
+        handlers = CrawlHandlers(Settings(per_domain_delay_seconds=1), client_factory=lambda ctx: http)
+        handlers._robots(http, "example.com")
+    assert handlers.gate.delay_for("example.com") == 5
