@@ -37,8 +37,8 @@ class Query:
 
 
 class Client:
-    def __init__(self, opportunities, signals):
-        self.data = {"opportunities": opportunities, "signals": signals}
+    def __init__(self, opportunities, signals, companies=()):
+        self.data = {"opportunities": opportunities, "signals": signals, "companies": list(companies)}
         self.updates = []
     def table(self, name):
         return Query(self, name)
@@ -111,3 +111,26 @@ def test_rescore_stage_skips_without_credentials_and_cli_defaults_to_dry_run(mon
     assert cli.main(["rescore-opportunities"]) == 0
     assert cli.main(["rescore-opportunities", "--apply"]) == 0
     assert calls == [{"qualified_before": None, "apply": False}, {"qualified_before": None, "apply": True}]
+
+
+def test_signals_on_a_soft_merged_twin_count_for_the_surviving_company():
+    # The cleanup merged a duplicate "Accord Healthcare" row into the one holding the
+    # opportunity; the signals stayed on the duplicate and were read as "no signals".
+    companies = [{"id": "accord", "merged_into_company_id": None}, {"id": "accord-dup", "merged_into_company_id": "accord"}]
+    signals = [signal("impurity_characterization", 38, company="accord-dup"), signal("phase_iii", 18, company="accord-dup", n=1)]
+    client = Client([opportunity("o1", company="accord", score=90)], signals, companies)
+    result = rescore_stale_opportunities(client, qualified_before=RUN_START, now=NOW)
+    assert result["without_signals"] == 0
+    assert result["evaluated"] == 1
+    assert client.data["opportunities"][0]["score"] == 38 + 18 + 3  # plus the 400-day urgency bonus
+
+
+def test_rescore_runs_before_the_soft_merge_column_exists():
+    class NoMergeColumn(Client):
+        def table(self, name):
+            if name == "companies":
+                raise RuntimeError("column companies.merged_into_company_id does not exist")
+            return super().table(name)
+
+    client = NoMergeColumn([opportunity("o1")], [signal("impurity_characterization", 38)])
+    assert rescore_stale_opportunities(client, qualified_before=RUN_START, now=NOW)["without_signals"] == 0
