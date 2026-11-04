@@ -593,9 +593,9 @@ def apply_validated_agent_research(client: Any, *, job: dict[str, Any], validate
         # The canonical contacts table stores confidence as a decimal while
         # score dimensions use 0–100; score_contact normalizes that boundary.
         try:
-            scored_sources = client.table("contact_sources").select("source_type,evidence_strength,status").eq("contact_id", contact_id).eq("status", "USED").execute().data or []
+            scored_sources = client.table("contact_sources").select("source_type,evidence_strength,status,source_date,source_kind").eq("contact_id", contact_id).eq("status", "USED").execute().data or []
             scored = score_contact(contact, sources=scored_sources, opportunities=[{"id": opportunity_id}])
-            diagnostics = {"score": scored["score"], "dimensions": scored["dimensions"], "diagnostics": scored["diagnostics"]}
+            diagnostics = {"score": scored["score"], "dimensions": scored["dimensions"], "basis": scored["basis"], "diagnostics": scored["diagnostics"]}
             client.table("contacts").update({"quality_diagnostics": diagnostics}).eq("id", contact_id).execute()
         except Exception:
             # A diagnostics write must never discard an already persisted

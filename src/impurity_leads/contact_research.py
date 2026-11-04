@@ -12,10 +12,15 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 from urllib.parse import quote
 from urllib.request import Request, urlopen
+from urllib.parse import urlparse
 
 from impurity_leads.contacts.normalize import normalize_person_name
+from impurity_leads.crawling.client import create_crawl_client
+from impurity_leads.crawling.fetch import HttpFetcher
+from impurity_leads.crawling.robots import RobotsPolicy
 from impurity_leads.research_graph import publication_graph_entities
 from impurity_leads.contact_quality import QualityConfig, portfolio_quality
+from impurity_leads.research_providers import OfficialCompanyProvider, OfficialCompanyRequest
 from impurity_leads.zero_cost import ProviderUsage
 
 EUROPE_PMC = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
@@ -23,6 +28,72 @@ TECHNICAL_TERMS = ("analytical", "quality", "impurity", "degradation", "stabilit
 SOURCE_LIMIT_PER_QUERY = 5
 QUERY_LIMIT = 20
 _GENERIC_FIRST_NAMES = {"john", "james", "michael", "david", "robert", "jitendra", "singh", "kumar", "raj", "ravi"}
+
+
+def official_company_urls(domain: str) -> tuple[str, ...]:
+    """Return the small, predictable official-page allowlist for a company."""
+    host = urlparse(f"https://{domain}").hostname or ""
+    host = host.casefold().removeprefix("www.").rstrip(".")
+    if not host:
+        return ()
+    return tuple(f"https://{host}/{path}" for path in ("about", "leadership", "management", "quality", "research-development", "news"))
+
+
+def official_source_payload(*, contact_id: str, candidate: dict[str, Any]) -> dict[str, Any]:
+    metadata = dict(candidate.get("metadata") or {})
+    used = bool(metadata.get("contact_name_match")) and bool(candidate.get("signal_text"))
+    return {
+        "contact_id": contact_id,
+        "url": candidate["url"],
+        "title": str(candidate.get("title") or "Official company page")[:300],
+        "publisher": "Official company website",
+        "source_type": "official_company",
+        "status": "USED" if used else "REJECTED",
+        "evidence_strength": "HIGH" if used else "LOW",
+        "why_used": "Official company page names the contact and contains technical context." if used else None,
+        "why_not_used": None if used else "Page did not establish both contact identity and technical context.",
+        "rejection_reason": None if used else "WEAK_EVIDENCE",
+        "source_kind": "EXTERNAL_RESEARCH",
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "extraction_json": {**metadata, "attribution": "PERSON_DIRECT" if used else None},
+    }
+
+
+def opportunity_link_payload(opportunity_id: str, contact_id: str, source_id: str, *, identity_state: str) -> dict[str, Any] | None:
+    if identity_state not in {"CONFIRMED_MATCH", "PROBABLE_MATCH"}:
+        return None
+    return {
+        "opportunity_id": opportunity_id,
+        "contact_id": contact_id,
+        "role_fit_score": 70,
+        "rank": 1,
+        "rationale": "Official company evidence supports the contact identity and technical role context.",
+        "source_ids": [source_id],
+    }
+
+
+def _company_domain(client: Any, contact: dict[str, Any]) -> tuple[str, str]:
+    company_id = contact.get("company_id")
+    if not company_id:
+        return "", ""
+    rows = client.table("companies").select("legal_name,domain").eq("id", company_id).limit(1).execute().data or []
+    row = rows[0] if rows else {}
+    return str(row.get("domain") or ""), str(row.get("legal_name") or contact.get("company") or "")
+
+
+def _official_http_fetcher(settings: Any, domain: str):
+    client = create_crawl_client(timeout=float(getattr(settings, "request_timeout_seconds", 20.0)))
+    try:
+        robots = RobotsPolicy.fetch(client, f"https://{domain}", getattr(settings, "user_agent", "SVAK-Impurity-Lead-Research/0.1"))
+    except Exception:
+        client.close()
+        return None, None
+    return HttpFetcher(
+        client=client,
+        robots_policy=robots,
+        user_agent=getattr(settings, "user_agent", "SVAK-Impurity-Lead-Research/0.1"),
+        max_retries=int(getattr(settings, "max_retries", 2)),
+    ), client
 
 
 def _normalise_query(value: str) -> str:
@@ -198,6 +269,97 @@ def _terminal_source(*, contact_id: str, url: str, title: str, source_date: str 
     }
 
 
+def _run_official_company_research(
+    client: Any,
+    contact: dict[str, Any],
+    settings: Any,
+    *,
+    page_fetcher: Callable[[str], str | None] | None = None,
+) -> dict[str, int]:
+    """Fetch and persist bounded official-company evidence for one contact."""
+    try:
+        domain, company_name = _company_domain(client, contact)
+    except Exception:
+        return {"pages_attempted": 0, "pages_accepted": 0, "pages_failed": 1, "sources_used": 0, "links_created": 0}
+    if not domain:
+        return {"pages_attempted": 0, "pages_accepted": 0, "pages_failed": 0, "sources_used": 0, "links_created": 0}
+    owned_client = None
+    if page_fetcher is None:
+        fetcher, owned_client = _official_http_fetcher(settings, domain)
+        if fetcher is None:
+            return {"pages_attempted": 0, "pages_accepted": 0, "pages_failed": 1, "sources_used": 0, "links_created": 0}
+        page_fetcher = fetcher.fetch
+    try:
+        request = OfficialCompanyRequest(
+            contact_id=str(contact["id"]),
+            contact_name=str(contact.get("display_name") or contact.get("name") or ""),
+            company_name=company_name,
+            company_domain=domain,
+            urls=official_company_urls(domain),
+            max_pages=6,
+        )
+        result = OfficialCompanyProvider().discover(request, page_fetcher)
+        sources_used = links_created = 0
+        linked_opportunities: set[str] = set()
+        for candidate in result.candidates:
+            candidate_dict = {
+                "url": candidate.url,
+                "title": candidate.title,
+                "source_type": candidate.source_type,
+                "signal_text": candidate.signal_text,
+                "metadata": candidate.metadata,
+            }
+            existing = client.table("contact_sources").select("id").eq("contact_id", contact["id"]).eq("url", candidate.url).limit(1).execute().data or []
+            payload = official_source_payload(contact_id=str(contact["id"]), candidate=candidate_dict)
+            response = client.table("contact_sources").upsert(payload, on_conflict="contact_id,url").select("id").execute()
+            rows = getattr(response, "data", None) or []
+            source_id = rows[0].get("id") if rows else (existing[0].get("id") if existing else None)
+            if payload["status"] != "USED" or not source_id or existing:
+                continue
+            sources_used += 1
+            text = candidate.signal_text
+            themes, problems, derived_jtbd = _analysis_for(text, source_id)
+            client.table("contact_claims").insert({
+                "contact_id": contact["id"],
+                "claim_type": "OFFICIAL_COMPANY_CONTEXT",
+                "claim_text": f"Official company page links {contact.get('display_name') or 'the contact'} with technical context.",
+                "provenance": "OBSERVED",
+                "confidence": 0.82,
+                "source_ids": [source_id],
+            }).execute()
+            client.table("contact_works").insert({
+                "contact_id": contact["id"],
+                "work_type": "OFFICIAL_COMPANY_CONTEXT",
+                "title": candidate.title[:300],
+                "person_role": contact.get("title") or "Official company role context",
+                "company_context": company_name,
+                "topic": text[:500],
+                "technical_themes": [row["theme"] for row in themes],
+                "attribution": "COMPANY_CONTEXT",
+                "confidence": 0.72,
+                "source_ids": [source_id],
+            }).execute()
+            for row in themes:
+                client.table("contact_themes").upsert({"contact_id": contact["id"], **row}, on_conflict="contact_id,theme").execute()
+            for row in problems:
+                client.table("contact_problems").insert({"contact_id": contact["id"], **row}).execute()
+            for row in derived_jtbd:
+                client.table("contact_jtbd").insert({"contact_id": contact["id"], **row}).execute()
+            identity_state = "CONFIRMED_MATCH" if candidate.metadata.get("contact_name_match") else "NEEDS_REVIEW"
+            opportunities = client.table("opportunities").select("id,score").eq("company_id", contact.get("company_id")).gte("score", 50).neq("status", "dismissed").order("score", desc=True).limit(3).execute().data or []
+            for opportunity in opportunities:
+                link = opportunity_link_payload(str(opportunity["id"]), str(contact["id"]), str(source_id), identity_state=identity_state)
+                if link:
+                    client.table("opportunity_contacts").upsert(link, on_conflict="opportunity_id,contact_id").execute()
+                    if str(opportunity["id"]) not in linked_opportunities:
+                        linked_opportunities.add(str(opportunity["id"]))
+                        links_created += 1
+        return {**result.metrics, "sources_used": sources_used, "links_created": links_created}
+    finally:
+        if owned_client is not None:
+            owned_client.close()
+
+
 def _publication_work(contact_id: str, contact: dict[str, Any], item: dict[str, Any], source_id: str | None, text: str) -> dict[str, Any]:
     return {
         "contact_id": contact_id,
@@ -336,7 +498,14 @@ def _portfolio_snapshot(client: Any, settings: Any) -> dict[str, Any]:
         return {"gate_passed": False, "ai_mode": "TARGETED_SEARCH", "reason_for_ai_escalation": "quality snapshot unavailable"}
 
 
-def run_pending_contact_research(settings, *, limit: int = 10, fetcher: Callable[[str], dict[str, Any]] = _get_json, provider_usage: ProviderUsage | None = None) -> dict[str, Any]:
+def run_pending_contact_research(
+    settings,
+    *,
+    limit: int = 10,
+    fetcher: Callable[[str], dict[str, Any]] = _get_json,
+    page_fetcher: Callable[[str], str | None] | None = None,
+    provider_usage: ProviderUsage | None = None,
+) -> dict[str, Any]:
     """Process queued contact research runs using the backend-only Supabase key."""
     if not settings.supabase_url or not settings.supabase_secret_key:
         return {"status": "SKIPPED", "reason": "supabase_credentials_missing", "processed": 0}
@@ -344,7 +513,7 @@ def run_pending_contact_research(settings, *, limit: int = 10, fetcher: Callable
     client = create_client(settings.supabase_url, settings.supabase_secret_key)
     portfolio = _portfolio_snapshot(client, settings)
     queued = client.table("contact_research_runs").select("*").eq("status", "QUEUED").order("created_at").limit(limit).execute().data or []
-    totals = {"status": "COMPLETED", "processed": 0, "queries": 0, "sources": 0, "used": 0, "rejected": 0, "blocked": 0, "failed": 0, "pending": 0, "works": 0, "conflicts": 0}
+    totals = {"status": "COMPLETED", "processed": 0, "queries": 0, "sources": 0, "used": 0, "rejected": 0, "blocked": 0, "failed": 0, "pending": 0, "works": 0, "conflicts": 0, "official_pages": 0, "official_sources": 0, "opportunity_links": 0}
     totals["quality"] = portfolio
     for run in queued:
         run_id = run["id"]
@@ -359,6 +528,10 @@ def run_pending_contact_research(settings, *, limit: int = 10, fetcher: Callable
         supplied = client.table("contact_sources").select("*").eq("contact_id", contact["id"]).execute().data or []
         queries = _queries(contact, supplied)
         discovered = inspected = used = rejected = failed = works = claims = positions = education = problems = themes = jtbd = 0
+        try:
+            official_metrics = _run_official_company_research(client, contact, settings, page_fetcher=page_fetcher)
+        except Exception as exc:
+            official_metrics = {"pages_attempted": 0, "pages_accepted": 0, "pages_failed": 1, "sources_used": 0, "links_created": 0, "error": type(exc).__name__}
         seen_urls: set[str] = set()
         try:
             for query in queries:
@@ -439,9 +612,10 @@ def run_pending_contact_research(settings, *, limit: int = 10, fetcher: Callable
             completed_status = "COMPLETED" if inspected else "PARTIAL"
             now = datetime.now(timezone.utc).isoformat()
             quality = _portfolio_snapshot(client, settings)
+            quality["provider_metrics"] = {"official_company": official_metrics, "europe_pmc": {"queries": len(queries), "sources_inspected": inspected}}
             client.table("contact_research_runs").update({"status": completed_status, "completed_at": now, "queries_executed": len(queries), "sources_discovered": discovered, "sources_inspected": inspected, "sources_used": used, "sources_rejected": rejected, "sources_failed": failed, "new_claims": claims, "new_works": works, "new_problems": problems, "new_themes": themes, "new_jtbd": jtbd, "blocked_sources": 0, "quality_metrics": quality, "ai_mode": quality.get("ai_mode"), "reason_for_ai_escalation": quality.get("reason_for_ai_escalation")}).eq("id", run_id).execute()
             totals["quality"] = quality
-            totals.update(processed=totals["processed"] + 1, queries=totals["queries"] + len(queries), sources=totals["sources"] + inspected, used=totals["used"] + used, rejected=totals["rejected"] + rejected, failed=totals["failed"] + failed, works=totals["works"] + works, conflicts=totals["conflicts"])
+            totals.update(processed=totals["processed"] + 1, queries=totals["queries"] + len(queries), sources=totals["sources"] + inspected + official_metrics["pages_accepted"], used=totals["used"] + used, rejected=totals["rejected"] + rejected, failed=totals["failed"] + failed, works=totals["works"] + works, conflicts=totals["conflicts"], official_pages=totals["official_pages"] + official_metrics["pages_attempted"], official_sources=totals["official_sources"] + official_metrics["sources_used"], opportunity_links=totals["opportunity_links"] + official_metrics["links_created"])
         except Exception as exc:
             client.table("contact_research_runs").update({"status": "FAILED", "completed_at": datetime.now(timezone.utc).isoformat(), "error": str(exc)[:500], "error_code": "WORKER_ERROR"}).eq("id", run_id).execute()
     return totals

@@ -19,7 +19,7 @@ describe('canonical contact read model', () => {
   })
 
   it('uses persisted quality diagnostics for canonical contact quality', () => {
-    const [row] = buildCanonicalContacts([{ id: 'c1', display_name: 'A', company_id: 'co1', quality_diagnostics: { score: 61.1, dimensions: { current_role: 20 } } }], [], [], new Map([['co1', 'Acme']]))
+    const [row] = buildCanonicalContacts([{ id: 'c1', display_name: 'A', company_id: 'co1', quality_diagnostics: { score: 61.1, dimensions: { current_role: 20 }, basis: { current_role: 'MEASURED' } } }], [], [], new Map([['co1', 'Acme']]))
     expect(row.quality).toBe(61.1)
     expect(row.current_role_confidence).toBe(0.2)
   })
@@ -120,5 +120,23 @@ describe('evidence read model', () => {
     ])
     expect(grouped).toHaveLength(2)
     expect(grouped[0].signal_types).toEqual(['impurity', 'degradation'])
+  })
+})
+
+describe('role confidence and verification honesty', () => {
+  it('hides role confidence that was a fixed default rather than evidence', () => {
+    expect(readCurrentRoleConfidence({ quality_diagnostics: { dimensions: { current_role: 82 } } })).toBeNull()
+    expect(readCurrentRoleConfidence({ quality_diagnostics: { dimensions: { current_role: 40 }, basis: { current_role: 'ASSUMED' } } })).toBeNull()
+    expect(readCurrentRoleConfidence({ quality_diagnostics: { dimensions: { current_role: 85 }, basis: { current_role: 'SOURCE_DATED' } } })).toBe(0.85)
+  })
+
+  it('only reports a verified date when a contact channel was verified', () => {
+    const companies = new Map([['co1', 'Acme']])
+    const [roleOnly, verified] = buildCanonicalContacts([
+      { id: 'r', display_name: 'R', company_id: 'co1', email_status: 'ROLE_ONLY', last_verified_at: '2026-09-08' },
+      { id: 'v', display_name: 'V', company_id: 'co1', email_status: 'VERIFIED_PUBLIC', last_verified_at: '2026-09-05' },
+    ], [], [], companies)
+    expect(roleOnly.last_verified).toBeNull()
+    expect(verified.last_verified).toBe('2026-09-05')
   })
 })

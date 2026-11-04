@@ -293,6 +293,7 @@ grant select,insert,update,delete on public.crawl_tasks to service_role;
 -- Run summaries remain readable, but coordinator credentials/config/metrics are private.
 revoke select on public.crawl_runs from authenticated;
 grant select(id,started_at,completed_at,source_adapter,status,records_seen,records_inserted,errors,duration_seconds) on public.crawl_runs to authenticated;
+grant select(metrics_json, current_stage) on public.crawl_runs to authenticated;
 
 create function public.crawl_check_run(p_run_id uuid,p_coordinator_token uuid) returns void
 language plpgsql security invoker set search_path='' as $$

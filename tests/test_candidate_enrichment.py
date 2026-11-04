@@ -107,5 +107,6 @@ def test_generic_molecule_text_without_a_signal_does_not_change_candidate():
     result = enrich_candidate(client, company_id=company_id, molecule_id=molecule_id,
                               company_name="SANDOZ", molecule_name="TOBRAMYCIN", records=[generic])
     assert result["new_signals"] == 0
-    assert result["after_score"] == 44
+    # Two regulatory filings: 22 + 11 with diminishing weight per type.
+    assert result["after_score"] == 33
     assert result["promoted"] is False

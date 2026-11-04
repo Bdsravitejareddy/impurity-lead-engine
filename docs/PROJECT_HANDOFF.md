@@ -227,3 +227,13 @@ The next safe step is to run an authenticated browser acceptance pass against `h
 - Migration `20260912150000_molecule_intelligence.sql` adds typed `research_claims.claim_type`, permits `MOLECULE_CONTEXT`, adds RLS-protected `molecule_intelligence_sections`, and generalises `agent_research_jobs` with `job_kind`/`molecule_id` constraints. Existing contact jobs remain valid.
 - `queue_molecule_intelligence_job`, molecule-aware Work prompts/validation, and deterministic section generation reuse the existing GitHub staging/message bus. Source-backed claims are persisted to the research graph; summaries retain supporting claim IDs. OpenAI is not required.
 - Production migration verification confirmed the new table and job/claim graph tables retain RLS. Existing contact research and crawler flows remain unchanged.
+
+## Working-model integration update (2026-09-27)
+
+- Added a bounded official-company research provider. It validates canonical domains/subdomains, obeys the existing robots-aware HTTP boundary, parses only visible technical evidence, rejects vendor/irrelevant pages, and never infers private mailboxes.
+- Integrated official-company research into the queued Contact Research Worker before Europe PMC. Accepted pages persist source-linked claims, company-context works, themes/problems/JTBD hypotheses, and idempotent `opportunity_contacts` links only for confirmed/probable identities.
+- Added provider metrics to the durable research quality snapshot and made repeated source runs idempotent by `(contact_id,url)`.
+- Replaced ad-hoc post-crawl exception logging with structured stage results for contact research, targeted research, opportunity evidence enrichment, and agent export. Later stages continue after an optional-stage failure and emit JSON diagnostics.
+- Added fake-client coverage for official evidence persistence, reruns, opportunity-link deduplication, provider failure isolation, bounded provider output, and daily-stage continuation.
+- Local validation: 291 non-integration backend tests passed, 68 frontend tests passed, Vite production build passed, fixture smoke produced one HOT opportunity and CSV/XLSX exports, and `git diff --check` passed.
+- PostgreSQL integration tests were not runnable in this managed macOS environment because no `TEST_DATABASE_URL`/local PostgreSQL is available and embedded PostgreSQL cannot enumerate processes under the sandbox permission profile. Production Supabase/GitHub workflow verification still requires configured external credentials; no live lead-count claim is made from this update.

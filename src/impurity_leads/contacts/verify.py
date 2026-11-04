@@ -82,6 +82,7 @@ def apply_contact_verification(
             result.last_verified_at = now
 
     if result.email_status == "ROLE_ONLY" and has_current_identity:
+        # Nothing was verified for a role-only contact, so last_verified_at is
+        # left alone; stamping "now" made every batch-run contact look verified.
         result.contact_confidence = max(result.contact_confidence, 0.55)
-        result.last_verified_at = result.last_verified_at or now
     return result

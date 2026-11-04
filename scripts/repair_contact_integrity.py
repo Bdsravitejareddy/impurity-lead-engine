@@ -55,16 +55,33 @@ def _safe_count(rows: list[dict], key: str, value: str) -> int:
     return sum(1 for row in rows if str(row.get(key) or "") == value)
 
 
+def company_survivors(companies: list[dict]):
+    merged_into = {str(row["id"]): str(row["merged_into_company_id"]) for row in companies if row.get("id") and row.get("merged_into_company_id")}
+
+    def survivor_of(company_id: str) -> str:
+        current = company_id
+        for _ in range(10):
+            if current not in merged_into:
+                break
+            current = merged_into[current]
+        return current
+
+    return survivor_of
+
+
 def audit(client) -> dict:
     contacts = _rows(client, "contacts")
     active = [row for row in contacts if not row.get("merged_into_contact_id")]
+    # A person stored under two soft-merged companies ("Novartis" and
+    # "Novartis Pharmaceuticals") is compared under the surviving company.
+    survivor_of = company_survivors(_rows(client, "companies", "id,merged_into_company_id"))
     groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for row in active:
         # Recompute from the display name as well as the stored key. Legacy
         # imports are precisely where the stored normalized value may include
         # degree suffixes or punctuation.
         normalized = normalize_person_name(str(row.get("display_name") or row.get("normalized_name") or ""))
-        key = (str(row.get("company_id") or ""), normalized)
+        key = (survivor_of(str(row.get("company_id") or "")), normalized)
         if key[0] and key[1]:
             groups[key].append(row)
     decisions = []
@@ -75,7 +92,7 @@ def audit(client) -> dict:
         for row in rows:
             if row.get("id") == survivor.get("id"):
                 continue
-            decision = classify_contact_pair(survivor, row)
+            decision = classify_contact_pair({**survivor, "company_id": company_id}, {**row, "company_id": company_id})
             decisions.append({
                 "company_id": company_id,
                 "normalized_name": normalized_name,
