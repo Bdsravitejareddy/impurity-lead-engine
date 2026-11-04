@@ -38,3 +38,13 @@ class RobotsPolicy:
 
     def can_fetch(self, url: str) -> bool:
         return self._parser.can_fetch(self.user_agent, url)
+
+    def crawl_delay(self) -> float | None:
+        """Seconds between requests from Crawl-delay, or Request-rate as a fallback."""
+        delay = self._parser.crawl_delay(self.user_agent)
+        if delay is not None:
+            return float(delay)
+        rate = self._parser.request_rate(self.user_agent)
+        if rate and rate.requests > 0:
+            return rate.seconds / rate.requests
+        return None

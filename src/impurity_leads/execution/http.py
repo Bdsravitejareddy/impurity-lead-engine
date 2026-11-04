@@ -19,19 +19,36 @@ class _Host:
     next_request: float = 0.0
 
 
+def _host_key(url) -> str:
+    host = (httpx.URL(url).host or "").lower().rstrip(".")
+    return host[4:] if host.startswith("www.") else host
+
+
 class HostGate:
     """Serialize a host, including www aliases, across every client sharing this gate."""
+
+    # A robots.txt Crawl-delay above this would stall a worker for the whole run.
+    MAX_CRAWL_DELAY = 60.0
 
     def __init__(self, delay_seconds=1.0):
         self.delay_seconds = max(0.0, delay_seconds)
         self._hosts = {}
+        self._delays = {}
         self._lock = threading.Lock()
+
+    def set_delay(self, url, seconds):
+        """Honour a host's robots.txt Crawl-delay when it is longer than the default."""
+        if seconds is None:
+            return
+        with self._lock:
+            self._delays[_host_key(url)] = min(max(0.0, float(seconds)), self.MAX_CRAWL_DELAY)
+
+    def delay_for(self, host):
+        return max(self.delay_seconds, self._delays.get(_host_key(f"https://{host}/"), 0.0))
 
     @contextmanager
     def hold(self, url, context):
-        host = (httpx.URL(url).host or "").lower().rstrip(".")
-        if host.startswith("www."):
-            host = host[4:]
+        host = _host_key(url)
         with self._lock:
             state = self._hosts.setdefault(host, _Host())
         while True:
@@ -52,7 +69,7 @@ class HostGate:
             yield
         finally:
             if sent:
-                state.next_request = time.monotonic() + self.delay_seconds
+                state.next_request = time.monotonic() + max(self.delay_seconds, self._delays.get(host, 0.0))
             state.lock.release()
 
 

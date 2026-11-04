@@ -73,7 +73,9 @@ class CrawlHandlers:
         if response.status_code==404: text=''
         else:
             response.raise_for_status();text=response.text
-        return RobotsPolicy.from_text(text,base,self.settings.user_agent)
+        policy=RobotsPolicy.from_text(text,base,self.settings.user_agent)
+        self.gate.set_delay(base,policy.crawl_delay())
+        return policy
     def _sitemap(self,client,url,policy,required=False):
         if not policy.can_fetch(url):return None
         response=client.get(url,headers={'User-Agent':self.settings.user_agent})
