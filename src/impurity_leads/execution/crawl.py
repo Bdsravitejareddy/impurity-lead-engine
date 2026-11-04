@@ -104,20 +104,20 @@ class CrawlHandlers:
             for index in range(cp.get('index',0),len(cp['urls'])):
                 ctx.check()
                 url=cp['urls'][index]
-                html=None
+                html=None;modified=None
                 if policy.can_fetch(url):
                     response=client.get(url,headers={'User-Agent':self.settings.user_agent})
                     if response.status_code not in {401,403,404,410}:
-                        response.raise_for_status();html=response.text
-                yield cp,index,url,html
+                        response.raise_for_status();html=response.text;modified=response.headers.get('Last-Modified')
+                yield cp,index,url,html,modified
     def company(self,ctx):
         records=list(ctx.result.get('records',[]))
         seed_indexes=list(ctx.result.get('record_seed_indexes',[]))
         adapter=CompanySiteAdapter()
-        for cp,index,url,html in self._pages(ctx):
+        for cp,index,url,html,modified in self._pages(ctx):
             if html:
                 for seed in cp['seeds']:
-                    parsed = adapter.parse_html(url,html,seed['company_name'],seed['molecules'])
+                    parsed = adapter.parse_html(url,html,seed['company_name'],seed['molecules'],last_modified=modified)
                     records.extend(r.model_dump(mode='json') for r in parsed)
                     seed_indexes.extend([cp['seeds'].index(seed)] * len(parsed))
             cp={**cp,'index':index+1}
@@ -127,7 +127,7 @@ class CrawlHandlers:
         wanted=set(ctx.checkpoint['opportunity_keys'])
         opportunities=[o for o in self.opportunities if o.company_name+'|'+o.molecule_name in wanted]
         candidates=dict(ctx.result.get('candidates',{}))
-        for cp,index,url,html in self._pages(ctx,True):
+        for cp,index,url,html,_ in self._pages(ctx,True):
             if html:
                 for name in dict.fromkeys(o.company_name for o in opportunities):
                     items=extract_contacts_from_html(url,html,name,datetime.fromisoformat(cp['observed_at']))

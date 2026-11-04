@@ -56,3 +56,14 @@ def test_extracted_candidates_match_existing_contact_pipeline():
     expected=enrich_opportunity_contacts(opportunity,'example.com',[(url,html)],now=now)
     candidates=extract_contacts_from_html(url,html,'Example Pharma',now)
     assert enrich_contact_candidates(opportunity,'example.com',candidates,now)==expected
+
+
+def test_company_records_take_their_date_from_last_modified():
+    def handler(req):
+        if req.url.path=='/sitemap.xml':return httpx.Response(200,text='<urlset><url><loc>https://example.com/jobs/1</loc></url></urlset>')
+        if req.url.path=='/jobs/1':
+            return httpx.Response(200,text=Path('tests/fixtures/company_job.html').read_text(),headers={'Last-Modified':'Wed, 21 Oct 2026 07:28:00 GMT'})
+        return httpx.Response(404)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        records=CrawlHandlers(Settings(),client_factory=lambda ctx:client).company(Ctx())['records']
+    assert records and {r['published_at'] for r in records}=={'2026-10-21T07:28:00Z'}
