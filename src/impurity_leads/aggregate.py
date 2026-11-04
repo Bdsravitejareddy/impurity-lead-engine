@@ -1,4 +1,5 @@
 from collections import Counter, defaultdict
+from datetime import datetime
 
 from impurity_leads.models import Opportunity, Signal
 from impurity_leads.normalize import normalize_company_name, normalize_molecule_name
@@ -31,7 +32,7 @@ def aggregate_opportunities(signals: list[Signal]) -> list[Opportunity]:
     return [Opportunity(**candidate) for candidate in aggregate_candidates(signals) if candidate["priority"] is not None]
 
 
-def aggregate_candidates(signals: list[Signal]) -> list[dict]:
+def aggregate_candidates(signals: list[Signal], now: datetime | None = None) -> list[dict]:
     """Aggregate every resolved company/molecule pair, including unqualified ones.
 
     Qualification remains controlled by ``priority``; retaining the candidate
@@ -50,7 +51,7 @@ def aggregate_candidates(signals: list[Signal]) -> list[dict]:
         company = Counter(s.company_name for s in group).most_common(1)[0][0]
         molecule = Counter(s.molecule_name for s in group).most_common(1)[0][0]
         unique = list({s.fingerprint: s for s in group}.values())
-        score = score_signals(unique)
+        score = score_signals(unique, now=now)
         signal_types = {s.signal_type for s in unique}
         priority = _priority(score, signal_types)
 
