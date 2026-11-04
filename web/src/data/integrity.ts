@@ -88,7 +88,7 @@ export function buildCanonicalContacts(
       quality: contact.contact_quality_score ?? contact.quality_diagnostics?.score ?? null,
       current_role_confidence: readCurrentRoleConfidence(contact),
       contactability: contact.email_status || contact.phone_status || (contact.profile_url ? 'PROFESSIONAL' : 'UNKNOWN'),
-      last_verified: contact.last_verified_at || null,
+      last_verified: verifiedChannelDate(contact),
     }
   })
 }
@@ -97,7 +97,18 @@ export function readCurrentRoleConfidence(contact: any) {
   const diagnostic = String(contact.quality_diagnostics?.diagnostics?.current_role || '').toLowerCase()
   if (/missing|not established|stale/.test(diagnostic)) return null
   if (contact.current_role_confidence != null) return Number(contact.current_role_confidence)
+  // Only show a percentage the backend actually derived from evidence. Rows
+  // scored before `basis` existed hold fixed defaults (82/62/20), not data.
+  const basis = contact.quality_diagnostics?.basis?.current_role
+  if (basis !== 'MEASURED' && basis !== 'SOURCE_DATED') return null
   return contact.quality_diagnostics?.dimensions?.current_role != null ? Number(contact.quality_diagnostics.dimensions.current_role) / 100 : null
+}
+
+// last_verified_at was stamped on role-only contacts by batch runs without any
+// check, so it only means "verified" when a public email or phone was confirmed.
+export function verifiedChannelDate(contact: any) {
+  const verified = ['VERIFIED_PUBLIC', 'PATTERN_CONFIRMED']
+  return verified.includes(String(contact.email_status || '')) || verified.includes(String(contact.phone_status || '')) ? contact.last_verified_at || null : null
 }
 
 const toPercent = (value: any) => {

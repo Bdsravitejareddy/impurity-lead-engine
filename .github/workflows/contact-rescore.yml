@@ -1,0 +1,38 @@
+name: contact quality rescore
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "audit is read-only; apply rewrites contacts.quality_diagnostics only"
+        required: true
+        default: audit
+        type: choice
+        options: [audit, apply]
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install .
+      - name: Audit or apply contact rescore
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python scripts/rescore_contacts.py --mode "${{ inputs.mode }}" | tee contact-rescore-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contact-rescore-report
+          path: contact-rescore-report.json
+          if-no-files-found: ignore
+          retention-days: 14

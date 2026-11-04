@@ -76,3 +76,19 @@ def test_old_unconfirmed_affiliation_becomes_stale():
     stale = apply_contact_verification(contact, "example.com", None, NOW)
     assert stale.email_status == "STALE"
     assert stale.phone_status == "STALE"
+
+
+def test_role_only_contact_is_not_stamped_as_verified():
+    from datetime import datetime, timezone
+
+    from impurity_leads.contacts.models import ContactCandidate, ContactEvidence
+    from impurity_leads.contacts.verify import apply_contact_verification
+
+    now = datetime(2026, 11, 4, tzinfo=timezone.utc)
+    contact = ContactCandidate(
+        company_name="Example Pharma", display_name="Asha Rao", normalized_name="asha rao", title="Head of Quality",
+        evidence=[ContactEvidence(evidence_type="identity", observed_value="Asha Rao", source_type="company_site", source_url="https://example.test/team", evidence_text="Asha Rao, Head of Quality", observed_at=now, fingerprint="f1")],
+    )
+    result = apply_contact_verification(contact, "example.test", None, now)
+    assert result.email_status == "ROLE_ONLY"
+    assert result.last_verified_at is None
