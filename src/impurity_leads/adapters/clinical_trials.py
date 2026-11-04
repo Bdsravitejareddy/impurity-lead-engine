@@ -4,6 +4,7 @@ from dateutil.parser import isoparse
 
 from impurity_leads.adapters.base import SourceAdapter
 from impurity_leads.models import SourceRecord
+from impurity_leads.normalize import is_inactive_comparator
 
 
 class ClinicalTrialsAdapter(SourceAdapter):
@@ -36,7 +37,7 @@ class ClinicalTrialsAdapter(SourceAdapter):
             if intervention.get("type") != "DRUG":
                 continue
             molecule = intervention.get("name")
-            if not molecule:
+            if not molecule or is_inactive_comparator(molecule):
                 continue
             signal_text = " ".join(
                 part for part in [
