@@ -81,3 +81,124 @@ tbody tr{transition:background .16s ease,transform .16s ease}tbody tr:hover{back
 
 .agent-research-panel{margin-top:18px}.agent-job-list{display:grid;gap:12px}.agent-job-card{border:1px solid var(--line);border-radius:12px;padding:14px;background:#fff}.agent-job-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.agent-job-head strong,.agent-job-head span{display:block}.agent-job-head span{font-size:12px;color:var(--muted);margin-top:4px}.agent-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.agent-submit{margin-top:12px;border-top:1px solid var(--line);padding-top:12px}.agent-submit textarea{width:100%;min-height:150px;resize:vertical;border:1px solid var(--line);border-radius:8px;padding:10px;background:#fff;color:var(--ink);font:12px ui-monospace,monospace}
 .data-connection-error{min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 25%,#fff8f5 0,#f5f7fa 55%)}.data-connection-error .panel{width:min(620px,100%);padding:32px}.data-connection-error h2{margin:12px 0 10px}.data-connection-error p{color:#62737b;font-size:13px;line-height:1.6;margin-bottom:12px}.data-connection-error .error-lead{color:#42545d;font-weight:600}.failure-panel{margin-top:18px}.failure-badge{color:#a54735;background:#fff0ed}.failure-item{border-top:1px solid #edf0f2;padding:15px 0}.failure-item strong{display:block;font-size:13px;color:#263f49}.failure-item p{font-size:12px;color:#62737b;line-height:1.55;margin:6px 0}.failure-item small{display:block;color:#536d59;font-size:11px;line-height:1.5}.failure-code{display:block;color:#a06e61;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:4px}.clear-panel{background:#f7fbf3;border-color:#d9e8ca}.clear-panel h3{color:#3d6f4b}.error{color:#a54735}
+
+/* SVAK liquid glass theme. Translucent, blurred surfaces over a soft field of
+   the four SVAK hexagon colours; this layer overrides the earlier flat palette. */
+:root{
+  --svak-indigo:#3F3D99;--svak-amber:#F0A43A;--svak-green:#6E9E3C;--svak-red:#E0602C;--svak-ink:#2E2457;
+  --ink:var(--svak-ink);--muted:#6E6888;--line:rgba(255,255,255,.55);--accent:var(--svak-indigo);--accent-soft:rgba(63,61,153,.1);
+  --hot:#D4521F;--high:#B8731A;--review:var(--svak-indigo);
+  --glass:rgba(255,255,255,.52);--glass-strong:rgba(255,255,255,.72);--glass-edge:rgba(255,255,255,.75);
+  --glass-blur:blur(22px) saturate(180%);
+  --glass-shadow:inset 0 1px 0 rgba(255,255,255,.9),inset 0 -1px 0 rgba(255,255,255,.25),0 10px 34px rgba(46,36,87,.1);
+  --glass-shadow-lift:inset 0 1px 0 rgba(255,255,255,.95),inset 0 -1px 0 rgba(255,255,255,.3),0 18px 46px rgba(46,36,87,.16);
+  --shadow:var(--glass-shadow-lift);--panel:var(--glass);--surface:var(--glass-strong);
+  color:var(--ink);
+}
+body{background:#f4f2fa;color:var(--ink)}
+body::before{content:"";position:fixed;inset:-20vmax;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(38vmax 38vmax at 12% 18%,rgba(63,61,153,.30),transparent 70%),
+    radial-gradient(34vmax 34vmax at 88% 12%,rgba(240,164,58,.30),transparent 70%),
+    radial-gradient(36vmax 36vmax at 80% 88%,rgba(110,158,60,.24),transparent 70%),
+    radial-gradient(32vmax 32vmax at 22% 92%,rgba(224,96,44,.22),transparent 70%),
+    linear-gradient(160deg,#f7f5fc,#efeef8);
+  filter:saturate(115%);animation:glassDrift 40s ease-in-out infinite alternate}
+@keyframes glassDrift{to{transform:translate3d(3vmax,-2vmax,0) rotate(4deg)}}
+.app{background:transparent}
+
+/* Shared glass surface */
+.sidebar,header,.panel,.kpi,.hero,.company-opportunity-card,.molecule-opportunity-card,.kancol,.kancard,.search,.login-card,.research-coverage>div,.research-coverage button,.contact-metrics>div,.theme-card,.problem-card,.agent-job-card,.form-section,.repeat-card{
+  background:var(--glass);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);
+  border:1px solid var(--glass-edge);box-shadow:var(--glass-shadow)}
+.panel,.kpi,.company-opportunity-card,.molecule-opportunity-card{border-radius:20px}
+.kpi{border-radius:18px}
+.panel:hover,.kpi:hover,.company-opportunity-card:hover{border-color:#fff;box-shadow:var(--glass-shadow-lift)}
+.kpi-button:hover{transform:translateY(-3px)}
+.kpi-button:focus-visible,.google-btn:focus-visible,.profile-import-modal button:focus-visible{outline:3px solid rgba(63,61,153,.45)}
+
+/* Sidebar: a frosted column with the SVAK logo */
+.sidebar{margin:14px 0 14px 14px;height:calc(100vh - 28px);top:14px;border-radius:26px;color:var(--ink);background:rgba(255,255,255,.46)}
+.brand{flex-direction:column;align-items:stretch;gap:12px;padding:6px 8px 26px;position:relative}
+.brandlogo{display:block;width:100%;max-width:210px;height:auto;margin:0 auto;filter:drop-shadow(0 6px 14px rgba(46,36,87,.12))}
+.brandtitle{text-align:center;padding-top:12px;border-top:1px solid rgba(46,36,87,.08)}
+.brand strong{color:var(--ink)}.brand span{color:var(--muted)}
+.brand .mobile-close{position:absolute;top:0;right:0;color:var(--muted)}
+.navitem{color:#5A5478;border-radius:14px}
+.navitem:hover{background:rgba(255,255,255,.55);color:var(--ink)}
+.navitem.active{background:rgba(255,255,255,.8);color:var(--svak-indigo);font-weight:600;box-shadow:inset 0 1px 0 #fff,0 6px 18px rgba(63,61,153,.14),inset 3px 0 0 var(--svak-indigo)}
+.sidefoot{color:var(--muted)}
+.dot,.status-pill i,.live i{background:var(--svak-green)}
+
+/* Header floats as a glass bar */
+header{margin:14px 14px 0;border-radius:22px;background:rgba(255,255,255,.5);border-bottom:1px solid var(--glass-edge)}
+h1,.panel h3,.section-heading h3,.form-section h3{color:var(--ink)}
+.eyebrow,.muted,.kpi span,.health div span,th,.kanhead{color:var(--muted)}
+.live{color:var(--svak-green)}.fallback{color:var(--high)}
+
+/* Glass pill buttons */
+.refresh,.copybtn,.filter-button,.google-btn{background:rgba(255,255,255,.6);border:1px solid var(--glass-edge);color:var(--ink);border-radius:999px;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);box-shadow:inset 0 1px 0 #fff,0 4px 12px rgba(46,36,87,.08)}
+.refresh:hover,.copybtn:hover,.google-btn:hover{background:rgba(255,255,255,.85)}
+.primary,.search-button{background:linear-gradient(135deg,#4B49B0,var(--svak-indigo));color:#fff;border-radius:999px;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 8px 22px rgba(63,61,153,.32)}
+.primary:hover,.search-button:hover{background:linear-gradient(135deg,#5654BF,#46449F)}
+.filter-button:hover,.filter-button.selected{background:rgba(63,61,153,.12);border-color:rgba(63,61,153,.3);color:var(--svak-indigo)}
+.search{border-radius:999px;padding:0 16px}.search input{background:transparent;color:var(--ink)}
+
+/* Hero: glass with a four-colour glow */
+.hero{border-radius:26px;background:linear-gradient(120deg,rgba(255,255,255,.62),rgba(255,255,255,.38))}
+.hero::after{width:340px;height:340px;right:-90px;top:-150px;background:conic-gradient(from 200deg,rgba(63,61,153,.35),rgba(240,164,58,.35),rgba(110,158,60,.3),rgba(224,96,44,.35),rgba(63,61,153,.35));filter:blur(40px)}
+.hero p{color:#5A5478}
+
+/* Priority colours follow the hexagons: HOT red-orange, HIGH amber, REVIEW indigo */
+.kpi b.hot,.hot{color:var(--hot)}.kpi b.high,.high{color:var(--high)}.kpi b.review,.review{color:var(--review)}
+.barrow>div{background:rgba(46,36,87,.08)}
+.barrow i{background:linear-gradient(90deg,#F08A5D,var(--svak-red))}
+.barrow i.high{background:linear-gradient(90deg,#F7C77D,var(--svak-amber))}
+.barrow i.review{background:linear-gradient(90deg,#8C8AD6,var(--svak-indigo))}
+.status-pill{color:var(--svak-green)}
+
+/* Rows and chips inside glass panels */
+.leadrow,td,.evidenceitem,.contactcard,.copyrow,.healthrow,.settingrow,.insight,.failure-item,.related-opportunity{border-top-color:rgba(46,36,87,.07)}
+.leadrow:hover,tbody tr:hover,.clickable-row:hover,.evidenceitem:hover,.contactcard:hover,.related-opportunity:hover{background:rgba(255,255,255,.45)}
+th{background:rgba(255,255,255,.35)}
+.company-avatar,.contactavatar{background:linear-gradient(135deg,rgba(63,61,153,.14),rgba(110,158,60,.14));color:var(--svak-indigo);border-radius:11px}
+.signals span,.tag,.evidencetag,.molecule-chips span,.molecule-card-meta span{background:rgba(255,255,255,.6);color:#4A4470;border:1px solid rgba(255,255,255,.8);border-radius:999px}
+.company-opportunity-row{background:transparent}.company-opportunity-row:hover{background:rgba(255,255,255,.35)}
+.molecule-opportunity-list{background:rgba(255,255,255,.22);border-top-color:rgba(46,36,87,.07)}
+.molecule-opportunity-card:hover{border-color:#fff}
+.readiness-banner{background:rgba(110,158,60,.12);border-color:rgba(110,158,60,.25);color:#3E5F22}
+.fitbox{background:rgba(240,164,58,.1);border-left-color:var(--svak-amber)}.fitbox strong{color:#9A6216}
+.evidenceitem a,.contactactions a,td a,.contact-link{color:var(--svak-indigo)}
+.statusbadge{background:rgba(240,164,58,.16);color:#8E5A12}
+
+/* Pipeline board */
+.kancol{border-radius:18px;background:rgba(255,255,255,.32)}
+.kancard{border-radius:14px;background:rgba(255,255,255,.7)}
+
+/* Crawler banner: deep indigo glass */
+.crawlerbanner{border-radius:24px;background:linear-gradient(125deg,rgba(46,36,87,.92),rgba(63,61,153,.85));border:1px solid rgba(255,255,255,.25);box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 18px 46px rgba(46,36,87,.3);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur)}
+.crawlerbanner p,.runmetric span{color:rgba(255,255,255,.72)}.runmetric b{color:var(--svak-amber)}
+.crawl-message{background:rgba(110,158,60,.12);border-color:rgba(110,158,60,.25);color:#3E5F22;border-radius:12px}
+.clear-panel{background:rgba(110,158,60,.1);border-color:rgba(110,158,60,.25)}
+
+/* Sign-in */
+.login{background:transparent}
+.login-card{border-radius:28px;background:rgba(255,255,255,.58);box-shadow:var(--glass-shadow-lift)}
+.login-logo{display:block;width:100%;max-width:300px;margin:0 auto 22px}
+.login-card .eyebrow{text-align:center}.login-card h2,.login-card>p{text-align:center}
+.login-card input{background:rgba(255,255,255,.7);border-color:rgba(46,36,87,.12);border-radius:12px}
+
+.loading{background:transparent}
+.data-connection-error{background:transparent}
+
+/* Phones: the sidebar becomes a full-height glass drawer and the header spans the width */
+@media(max-width:700px){
+  .sidebar{margin:0;top:0;height:100vh;border-radius:0 24px 24px 0;background:rgba(255,255,255,.8)}
+  header{margin:8px 8px 0;border-radius:18px}
+  .mobile-menu{background:rgba(255,255,255,.7);border:1px solid var(--glass-edge);border-radius:12px;padding:7px;color:var(--ink);box-shadow:inset 0 1px 0 #fff,0 4px 12px rgba(46,36,87,.08)}
+  .brandlogo{max-width:180px}
+}
+@media(prefers-reduced-transparency:reduce){
+  .sidebar,header,.panel,.kpi,.hero,.company-opportunity-card,.molecule-opportunity-card,.kancol,.kancard,.search,.login-card{background:#fbfaff;-webkit-backdrop-filter:none;backdrop-filter:none}
+}
+@media(prefers-reduced-motion:reduce){body::before{animation:none}}
