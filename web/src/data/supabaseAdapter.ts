@@ -71,14 +71,17 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
     runCoreQuery('all_opportunities', paged(signal => supabase!.from('opportunities').select('id,status,score,priority,company_id,molecule_id,molecules(canonical_name)').abortSignal(signal)), diagnostics, timeoutMs),
     runCoreQuery('signals', paged(signal => supabase!.from('signals').select('id,company_id,molecule_id,source_type,signal_type,source_url,source_record_id,evidence_text,event_date,confidence,base_weight,fingerprint').order('event_date', { ascending: false }).abortSignal(signal)), diagnostics, timeoutMs),
     runCoreQuery('contacts', paged(signal => supabase!.from('contacts').select('id,company_id,display_name,title,department,profile_url,primary_email,email_status,primary_phone,phone_status,role_fit_score,contact_confidence,technical_relevance,quality_diagnostics,last_verified_at,merged_into_contact_id').is('merged_into_contact_id', null).abortSignal(signal)), diagnostics, timeoutMs),
-    runCoreQuery('companies', paged(signal => supabase!.from('companies').select('id,legal_name,normalized_name').abortSignal(signal)), diagnostics, timeoutMs),
+    runCoreQuery('companies', paged(signal => supabase!.from('companies').select('id,legal_name,normalized_name,domain,country,company_type').abortSignal(signal)), diagnostics, timeoutMs),
     runCoreQuery('molecules', paged(signal => supabase!.from('molecules').select('id,canonical_name').abortSignal(signal)), diagnostics, timeoutMs),
   ])
 
   // These reads enrich Contact 360, molecule intelligence and diagnostics. A
   // slow or unavailable secondary table must not make the executive dashboard
   // unusable; its named failure remains visible in loadDiagnostics.
-  const [opportunityContacts, contactEvidence, runs, runMetrics, sources, positions, education, works, problems, themes, jtbd, claims, notes, history, conflicts, researchRuns, targetedJobs, agentJobs, agentSubmissions, moleculeSections, researchClaims, researchEntities] = await Promise.all([
+  const [companyMerges, opportunityContacts, contactEvidence, runs, runMetrics, sources, positions, education, works, problems, themes, jtbd, claims, notes, history, conflicts, researchRuns, targetedJobs, agentJobs, agentSubmissions, moleculeSections, researchClaims, researchEntities] = await Promise.all([
+    // Optional so the dashboard keeps working before the company soft-merge
+    // migration is applied; without it every company row stands alone.
+    runOptionalQuery('company_merges', paged(signal => supabase!.from('companies').select('id,merged_into_company_id').not('merged_into_company_id', 'is', null).abortSignal(signal)), diagnostics, secondaryTimeoutMs),
     runOptionalQuery('opportunity_contacts', paged(signal => supabase!.from('opportunity_contacts').select('opportunity_id,contact_id,role_fit_score,rank,rationale').abortSignal(signal), ['opportunity_id', 'contact_id']), diagnostics, secondaryTimeoutMs),
     runOptionalQuery('contact_evidence', paged(signal => supabase!.from('contact_evidence').select('contact_id,source_url,evidence_type,observed_at,evidence_text,source_type,metadata_json').abortSignal(signal)), diagnostics, contactIntelligenceTimeoutMs),
     runOptionalQuery('crawl_runs', signal => supabase!.from('crawl_runs').select('id,started_at,completed_at,source_adapter,status,records_seen,records_inserted,errors,duration_seconds').order('started_at', { ascending: false }).limit(10).abortSignal(signal), diagnostics, secondaryTimeoutMs),
@@ -105,6 +108,8 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
     runOptionalQuery('research_entities', paged(signal => supabase!.from('research_entities').select('id,entity_type,canonical_name,metadata_json').abortSignal(signal)), diagnostics, secondaryTimeoutMs),
   ])
   const loadDiagnostics = { degraded: diagnostics.length > 0, codes: diagnostics }
+  const survivorOf = resolveCompanyMerges(companyMerges.data ?? [])
+  const companyById = new Map((companies.data ?? []).map((company: any) => [company.id, company]))
   const intelTables = {sources: sources.data ?? [], evidence: contactEvidence.data ?? [], positions: positions.data ?? [], education: education.data ?? [], works: works.data ?? [], problems: problems.data ?? [], themes: themes.data ?? [], jtbd: jtbd.data ?? [], claims: claims.data ?? [], notes: notes.data ?? [], history: history.data ?? [], conflicts: conflicts.data ?? [], researchRuns: researchRuns.data ?? []}
   const contactEvidenceById = new Map<string, any[]>()
   ;(contactEvidence.data ?? []).forEach((e: any) => { const items = contactEvidenceById.get(e.contact_id) ?? []; if (!items.some((x: any) => x.source_url === e.source_url && x.evidence_type === e.evidence_type)) items.push(e); contactEvidenceById.set(e.contact_id, items) })
@@ -113,7 +118,7 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
   const contactByCompany = new Map<string, any[]>()
   const companyNames = new Map<string, string>()
   ;(companies.data ?? []).forEach((company: any) => { if (company.id) companyNames.set(company.id, company.legal_name || company.normalized_name || 'Unknown company') })
-  ;(contacts.data ?? []).forEach((c: any) => {
+  ;(contacts.data ?? []).map((c: any) => ({ ...c, company_id: survivorOf(c.company_id) })).forEach((c: any) => {
     const list = contactByCompany.get(c.company_id) ?? []
     const evidence = contactEvidenceById.get(c.id) ?? []
     const metadata = evidence.map((e: any) => e.metadata_json || {}).reduce((acc: any, item: any) => ({ ...acc, ...item }), {})
@@ -121,8 +126,8 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
     contactByCompany.set(c.company_id, list)
   })
   const signalByPair = new Map<string, any[]>()
-  ;(signals.data ?? []).forEach((s: any) => { const key = `${s.company_id}:${s.molecule_id}`; const list = signalByPair.get(key) ?? []; list.push(s); signalByPair.set(key, list) })
-  const leads = (opportunities.data ?? []).filter((o: any) => !isInactiveComparator(o.molecules?.canonical_name)).map((o: any) => {
+  ;(signals.data ?? []).forEach((s: any) => { const key = `${survivorOf(s.company_id)}:${s.molecule_id}`; const list = signalByPair.get(key) ?? []; list.push(s); signalByPair.set(key, list) })
+  const leads = (opportunities.data ?? []).filter((o: any) => !isInactiveComparator(o.molecules?.canonical_name)).map((row: any) => ({ ...row, company_id: survivorOf(row.company_id), companies: companyById.get(survivorOf(row.company_id)) ?? row.companies })).map((o: any) => {
     const company = o.companies ?? {}; const molecule = o.molecules ?? {}; const pair = signalByPair.get(`${o.company_id}:${o.molecule_id}`) ?? []
     const links = [...(linksByOpportunity.get(o.id) ?? [])].sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99))
     const linkedIds = new Set(links.map((link: any) => link.contact_id))
@@ -142,7 +147,7 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
   })
   const metricsByRun = new Map((runMetrics.data ?? []).map((row: any) => [row.id, row.metrics_json]))
   const latestRun = runs.data?.[0] ? { ...runs.data[0], metrics_json: metricsByRun.get(runs.data[0].id) ?? null } : undefined
-  const productOpportunities = (allOpportunities.data ?? []).filter((opportunity: any) => !isInactiveComparator(opportunity.molecules?.canonical_name))
+  const productOpportunities = (allOpportunities.data ?? []).filter((opportunity: any) => !isInactiveComparator(opportunity.molecules?.canonical_name)).map((opportunity: any) => ({ ...opportunity, company_id: survivorOf(opportunity.company_id) }))
   const canonicalOpportunityDetails = productOpportunities.map((opportunity: any) => ({ ...opportunity, molecule_name: opportunity.molecules?.canonical_name }))
   const canonicalSources = [
     ...(sources.data ?? []),
@@ -157,5 +162,16 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
   ;(researchEntities.data || []).filter((entity: any) => entity.entity_type === 'MOLECULE').forEach((entity: any) => { const moleculeId = entity.metadata_json?.molecule_id; if (moleculeId) moleculeEntityIds.set(entity.id, moleculeId) })
   const moleculeClaims = Object.fromEntries((researchClaims.data || []).reduce((map: Map<string, any[]>, claim: any) => { const moleculeId = moleculeEntityIds.get(claim.entity_id); if (!moleculeId) return map; const rows = map.get(moleculeId) || []; rows.push(claim); map.set(moleculeId, rows); return map }, new Map<string, any[]>()))
   const opportunityMetrics = summarizeOpportunityMetrics(productOpportunities)
-  return { leads, canonicalContacts, moleculeIntelligence, moleculeClaims, researchClaims: researchClaims.data || [], candidates: [], pipeline: { crawler: latestRun || null, contactResearch: researchRuns.data?.[0] || null, targetedResearch: latestTargeted || null, workExport, workIngestion }, loadDiagnostics, metrics: { opportunities_total: opportunityMetrics.total, qualified_ge_50: opportunityMetrics.qualified, hot: opportunityMetrics.hot, high: opportunityMetrics.high, review: opportunityMetrics.review, crawler: latestRun, companies_count: companies.data?.length ?? 0, molecules_count: molecules.data?.length ?? 0, signals_count: signals.data?.length ?? 0, canonical_contacts: canonicalContacts.length, opportunity_contact_links: opportunityContacts.data?.length ?? 0 } }
+  return { leads, canonicalContacts, moleculeIntelligence, moleculeClaims, researchClaims: researchClaims.data || [], candidates: [], pipeline: { crawler: latestRun || null, contactResearch: researchRuns.data?.[0] || null, targetedResearch: latestTargeted || null, workExport, workIngestion }, loadDiagnostics, metrics: { opportunities_total: opportunityMetrics.total, qualified_ge_50: opportunityMetrics.qualified, hot: opportunityMetrics.hot, high: opportunityMetrics.high, review: opportunityMetrics.review, crawler: latestRun, companies_count: (companies.data ?? []).filter((company: any) => survivorOf(company.id) === company.id).length, molecules_count: molecules.data?.length ?? 0, signals_count: signals.data?.length ?? 0, canonical_contacts: canonicalContacts.length, opportunity_contact_links: opportunityContacts.data?.length ?? 0 } }
+}
+
+// Maps a company id to the survivor of its soft merge (following chains), or
+// to itself when it was never merged.
+export function resolveCompanyMerges(merges: { id: string; merged_into_company_id: string | null }[]) {
+  const mergedInto = new Map(merges.filter(row => row.merged_into_company_id).map(row => [row.id, row.merged_into_company_id as string]))
+  return (id: string) => {
+    let current = id
+    for (let depth = 0; depth < 10 && mergedInto.has(current); depth++) current = mergedInto.get(current)!
+    return current
+  }
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { paged } from './supabaseAdapter'
+import { paged, resolveCompanyMerges } from './supabaseAdapter'
 
 function fakeTable(total: number) {
   const calls: { orders: string[]; from: number; to: number }[] = []
@@ -39,5 +39,22 @@ describe('paged supabase reads', () => {
     const build = () => { const query: any = { order: () => query, range: async () => ({ data: null, error: { message: 'permission denied' } }) }; return query }
     const result = await paged(build)(new AbortController().signal)
     expect(result).toEqual({ data: null, error: { message: 'permission denied' } })
+  })
+})
+
+describe('company soft merges', () => {
+  it('resolves merged companies to their survivor, following chains', () => {
+    const survivorOf = resolveCompanyMerges([
+      { id: 'bayer', merged_into_company_id: 'bayer-ag' },
+      { id: 'old-bayer', merged_into_company_id: 'bayer' },
+    ])
+    expect(survivorOf('bayer')).toBe('bayer-ag')
+    expect(survivorOf('old-bayer')).toBe('bayer-ag')
+    expect(survivorOf('cipla')).toBe('cipla')
+  })
+
+  it('does not loop forever on a merge cycle', () => {
+    const survivorOf = resolveCompanyMerges([{ id: 'a', merged_into_company_id: 'b' }, { id: 'b', merged_into_company_id: 'a' }])
+    expect(['a', 'b']).toContain(survivorOf('a'))
   })
 })
