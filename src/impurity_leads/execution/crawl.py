@@ -7,7 +7,7 @@ from impurity_leads.adapters.clinical_trials import ClinicalTrialsAdapter
 from impurity_leads.adapters.fda import FDAAdapter
 from impurity_leads.adapters.queries import CLINICAL_TRIALS_URL, FDA_PAGE_SIZE, FDA_URL, MAX_PAGES, clinical_trials_params, fda_params
 from impurity_leads.adapters.company_site import CompanySiteAdapter
-from impurity_leads.adapters.common_crawl import CommonCrawlAdapter
+from impurity_leads.adapters.common_crawl import CommonCrawlAdapter, IndexNameCache
 from impurity_leads.contacts.discovery import contact_candidate_urls
 from impurity_leads.contacts.extract import extract_contacts_from_html
 from impurity_leads.contacts.models import ContactCandidate
@@ -29,6 +29,7 @@ class CrawlHandlers:
         self.client_factory=client_factory
         self.reporter=reporter
         self.provider_usage=provider_usage
+        self.common_crawl_index=IndexNameCache()
     def client(self,ctx):
         return nullcontext(self.client_factory(ctx)) if self.client_factory else CrawlClient(ctx,self.settings,self.gate,usage=self.provider_usage)
     def structured(self,ctx):
@@ -80,7 +81,8 @@ class CrawlHandlers:
         common=[]
         try:
             adapter=CommonCrawlAdapter(client=client,user_agent=self.settings.user_agent,
-                max_urls_per_domain=12 if contact else 10,sleep_fn=lambda _:None)
+                max_urls_per_domain=12 if contact else 10,sleep_fn=lambda _:None,
+                index_cache=self.common_crawl_index)
             if contact:
                 common=adapter.discover(domain,url_terms=('leadership','management','team','people','about','research','science','rd','r-and-d','analytical','development','quality','regulatory','procurement','sourcing','contact','press','news','investor'))
             else:common=adapter.discover(domain)

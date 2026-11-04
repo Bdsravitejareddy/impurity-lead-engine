@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 from urllib.parse import urlparse
 
@@ -18,6 +19,11 @@ DEFAULT_TERMS = (
     "stability",
     "analytical",
 )
+
+
+# CDX rows are ~0.5 KB, so 2000 stays far below the crawl response cap. A large
+# domain unbounded exceeded it and was silently skipped.
+CDX_LIMIT = 2000
 
 
 def filter_index_records(
@@ -42,6 +48,21 @@ def filter_index_records(
     return output
 
 
+class IndexNameCache:
+    """The latest index name, fetched once and shared by every adapter in a run."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.value: str | None = None
+
+    def get(self, fetch) -> tuple[str, bool]:
+        with self._lock:
+            fetched = self.value is None
+            if fetched:
+                self.value = fetch()
+            return self.value, fetched
+
+
 class CommonCrawlAdapter:
     collection_url = "https://index.commoncrawl.org/collinfo.json"
     index_root = "https://index.commoncrawl.org"
@@ -52,13 +73,21 @@ class CommonCrawlAdapter:
         user_agent: str = "SVAK-Impurity-Lead-Research/0.1",
         max_urls_per_domain: int = 40,
         sleep_fn=time.sleep,
+        index_cache: IndexNameCache | None = None,
     ):
         self.client = client or create_crawl_client()
         self.user_agent = user_agent
         self.max_urls_per_domain = max_urls_per_domain
         self.sleep_fn = sleep_fn
+        self.index_cache = index_cache or IndexNameCache()
 
     def latest_index_name(self) -> str:
+        name, fetched = self.index_cache.get(self._fetch_latest_index_name)
+        if fetched:
+            self.sleep_fn(1.0)
+        return name
+
+    def _fetch_latest_index_name(self) -> str:
         response = self.client.get(self.collection_url, headers={"User-Agent": self.user_agent})
         response.raise_for_status()
         collections = response.json() or []
@@ -68,10 +97,15 @@ class CommonCrawlAdapter:
 
     def discover(self, domain: str, url_terms: tuple[str, ...] = DEFAULT_TERMS) -> list[str]:
         index_name = self.latest_index_name()
-        self.sleep_fn(1.0)
         response = self.client.get(
             f"{self.index_root}/{index_name}-index",
-            params={"url": f"{domain}/*", "output": "json", "filter": "status:200"},
+            params={
+                "url": f"{domain}/*",
+                "output": "json",
+                "filter": ["status:200", "mime:text/html"],
+                "collapse": "urlkey",
+                "limit": CDX_LIMIT,
+            },
             headers={"User-Agent": self.user_agent},
         )
         response.raise_for_status()

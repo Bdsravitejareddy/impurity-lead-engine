@@ -67,3 +67,17 @@ def test_company_records_take_their_date_from_last_modified():
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         records=CrawlHandlers(Settings(),client_factory=lambda ctx:client).company(Ctx())['records']
     assert records and {r['published_at'] for r in records}=={'2026-10-21T07:28:00Z'}
+
+
+def test_common_crawl_collection_list_is_fetched_once_per_run():
+    calls=[]
+    def handler(req):
+        calls.append(str(req.url))
+        if req.url.path=='/collinfo.json':return httpx.Response(200,json=[{'id':'CC-MAIN-2026-43'}])
+        if req.url.host=='index.commoncrawl.org':return httpx.Response(200,text='')
+        return httpx.Response(404)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        handlers=CrawlHandlers(Settings(),client_factory=lambda ctx:client)
+        handlers.company(Ctx());handlers.company(Ctx())
+    assert sum(url.endswith('/collinfo.json') for url in calls)==1
+    assert sum('CC-MAIN-2026-43-index' in url for url in calls)==2
