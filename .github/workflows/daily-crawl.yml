@@ -34,6 +34,8 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           ZERO_COST_MODE: "true"
           CRAWLER_USER_AGENT: ${{ secrets.CRAWLER_USER_AGENT }}
+          MOLECULE_DISCOVERY_ENABLED: ${{ vars.MOLECULE_DISCOVERY_ENABLED || 'false' }}
+          PATENTSVIEW_API_KEY: ${{ secrets.PATENTSVIEW_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
         if: always()

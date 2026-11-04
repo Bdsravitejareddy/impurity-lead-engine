@@ -8,6 +8,7 @@ from impurity_leads.targeted_research_jobs import run_pending_targeted_jobs
 from impurity_leads.opportunity_enrichment import run_pending_opportunity_enrichment
 from impurity_leads.agent_github import export_ready_agent_jobs
 from impurity_leads.execution.stages import run_post_crawl_stages
+from impurity_leads.molecule_discovery import run_molecule_discovery
 from impurity_leads.zero_cost import ProviderUsage
 
 
@@ -15,6 +16,10 @@ if __name__ == "__main__":
     settings = load_settings()
     provider_usage = ProviderUsage()
     exit_code = main(["run-daily"])
+    def molecule_discovery_stage():
+        # Off unless MOLECULE_DISCOVERY_ENABLED=true; returns SKIPPED otherwise.
+        return run_molecule_discovery(settings, provider_usage=provider_usage)
+
     def contact_stage():
         return run_pending_contact_research(settings, limit=10, provider_usage=provider_usage)
 
@@ -32,6 +37,7 @@ if __name__ == "__main__":
         return export_ready_agent_jobs(client, repo=os.environ["GITHUB_REPOSITORY"], limit=5, provider_usage=provider_usage)
 
     post_crawl = run_post_crawl_stages([
+        ("molecule_discovery", molecule_discovery_stage),
         ("contact_research", contact_stage),
         ("targeted_research", targeted_stage),
         ("opportunity_evidence_queue", opportunity_stage),
