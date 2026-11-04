@@ -66,14 +66,23 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
   const diagnostics: string[] = []
   // These reads are required to render the live opportunity/contact model.
   // Every request receives an AbortSignal and has a hard deadline.
-  const [opportunities, allOpportunities, signals, contacts, companies, molecules] = await Promise.all([
+  const [opportunities, allOpportunities, signalTotal, contacts, companies, moleculeTotal] = await Promise.all([
     runCoreQuery('opportunities', paged(signal => supabase!.from('opportunities').select('*, companies(*), molecules(*)').gte('score', 50).neq('status', 'dismissed').order('score', { ascending: false }).abortSignal(signal)), diagnostics, timeoutMs),
     runCoreQuery('all_opportunities', paged(signal => supabase!.from('opportunities').select('id,status,score,priority,company_id,molecule_id,molecules(canonical_name)').abortSignal(signal)), diagnostics, timeoutMs),
-    runCoreQuery('signals', paged(signal => supabase!.from('signals').select('id,company_id,molecule_id,source_type,signal_type,source_url,source_record_id,evidence_text,event_date,confidence,base_weight,fingerprint').order('event_date', { ascending: false }).abortSignal(signal)), diagnostics, timeoutMs),
+    // Totals only: downloading every signal and molecule row (~10k and ~4k)
+    // to count them exceeded the query deadline.
+    runCoreQuery('signals_count', signal => supabase!.from('signals').select('id', { count: 'exact', head: true }).abortSignal(signal) as any, diagnostics, timeoutMs),
     runCoreQuery('contacts', paged(signal => supabase!.from('contacts').select('id,company_id,display_name,title,department,profile_url,primary_email,email_status,primary_phone,phone_status,role_fit_score,contact_confidence,technical_relevance,quality_diagnostics,last_verified_at,merged_into_contact_id').is('merged_into_contact_id', null).abortSignal(signal)), diagnostics, timeoutMs),
     runCoreQuery('companies', paged(signal => supabase!.from('companies').select('id,legal_name,normalized_name,domain,country,company_type').abortSignal(signal)), diagnostics, timeoutMs),
-    runCoreQuery('molecules', paged(signal => supabase!.from('molecules').select('id,canonical_name').abortSignal(signal)), diagnostics, timeoutMs),
+    runCoreQuery('molecules_count', signal => supabase!.from('molecules').select('id', { count: 'exact', head: true }).abortSignal(signal) as any, diagnostics, timeoutMs),
   ])
+  // The dashboard shows evidence only for opportunity pairs, so read just the
+  // signals of those companies and molecules.
+  const opportunityCompanyIds = Array.from(new Set((allOpportunities.data ?? []).map((o: any) => o.company_id).filter(Boolean)))
+  const opportunityMoleculeIds = Array.from(new Set((allOpportunities.data ?? []).map((o: any) => o.molecule_id).filter(Boolean)))
+  const signals = opportunityCompanyIds.length && opportunityMoleculeIds.length
+    ? await runCoreQuery('signals', paged(signal => supabase!.from('signals').select('id,company_id,molecule_id,source_type,signal_type,source_url,source_record_id,evidence_text,event_date,confidence,base_weight,fingerprint').in('company_id', opportunityCompanyIds).in('molecule_id', opportunityMoleculeIds).order('event_date', { ascending: false }).abortSignal(signal)), diagnostics, timeoutMs)
+    : { data: [], error: null }
 
   // These reads enrich Contact 360, molecule intelligence and diagnostics. A
   // slow or unavailable secondary table must not make the executive dashboard
@@ -162,7 +171,7 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
   ;(researchEntities.data || []).filter((entity: any) => entity.entity_type === 'MOLECULE').forEach((entity: any) => { const moleculeId = entity.metadata_json?.molecule_id; if (moleculeId) moleculeEntityIds.set(entity.id, moleculeId) })
   const moleculeClaims = Object.fromEntries((researchClaims.data || []).reduce((map: Map<string, any[]>, claim: any) => { const moleculeId = moleculeEntityIds.get(claim.entity_id); if (!moleculeId) return map; const rows = map.get(moleculeId) || []; rows.push(claim); map.set(moleculeId, rows); return map }, new Map<string, any[]>()))
   const opportunityMetrics = summarizeOpportunityMetrics(productOpportunities)
-  return { leads, canonicalContacts, moleculeIntelligence, moleculeClaims, researchClaims: researchClaims.data || [], candidates: [], pipeline: { crawler: latestRun || null, contactResearch: researchRuns.data?.[0] || null, targetedResearch: latestTargeted || null, workExport, workIngestion }, loadDiagnostics, metrics: { opportunities_total: opportunityMetrics.total, qualified_ge_50: opportunityMetrics.qualified, hot: opportunityMetrics.hot, high: opportunityMetrics.high, review: opportunityMetrics.review, crawler: latestRun, companies_count: (companies.data ?? []).filter((company: any) => survivorOf(company.id) === company.id).length, molecules_count: molecules.data?.length ?? 0, signals_count: signals.data?.length ?? 0, canonical_contacts: canonicalContacts.length, opportunity_contact_links: opportunityContacts.data?.length ?? 0 } }
+  return { leads, canonicalContacts, moleculeIntelligence, moleculeClaims, researchClaims: researchClaims.data || [], candidates: [], pipeline: { crawler: latestRun || null, contactResearch: researchRuns.data?.[0] || null, targetedResearch: latestTargeted || null, workExport, workIngestion }, loadDiagnostics, metrics: { opportunities_total: opportunityMetrics.total, qualified_ge_50: opportunityMetrics.qualified, hot: opportunityMetrics.hot, high: opportunityMetrics.high, review: opportunityMetrics.review, crawler: latestRun, companies_count: (companies.data ?? []).filter((company: any) => survivorOf(company.id) === company.id).length, molecules_count: (moleculeTotal as any).count ?? 0, signals_count: (signalTotal as any).count ?? 0, canonical_contacts: canonicalContacts.length, opportunity_contact_links: opportunityContacts.data?.length ?? 0 } }
 }
 
 // Maps a company id to the survivor of its soft merge (following chains), or
