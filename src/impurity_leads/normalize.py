@@ -9,6 +9,16 @@ _QUALIFIER = re.compile(r"\b(?:high|low|medium|mid|standard|reduced|fixed)[\s-]d
 _DOSAGE_FORM = re.compile(r"\s+(?:for\s+)?(?:injection|infusion|tablets?|capsules?|cream|ointment|gel|oral solution|solution|suspension|patch)$", re.I)
 # Regimens and care descriptions are recorded as DRUG interventions but name no molecule.
 _NON_MOLECULE = re.compile(r"\b(?:chemotherapy|standard of care|best supportive care|usual care|investigator'?s choice)\b", re.I)
+# Biologics registered as DRUG interventions: antibodies (-mab), fusion proteins
+# (-cept), peptides (-tide), growth factors, cell and gene therapies, insulins.
+# Their makers do not buy small-molecule impurity standards.
+_BIOLOGIC = re.compile(
+    r"\w(?:mab|cept|tide|grastim|poetin|cel|vec)\b|\b(?:insulin|vaccine|antibod(?:y|ies)|\w*globulin|peptides?|cells?)\b",
+    re.I,
+)
+# Sponsor development codes: "BAY 94-8862", "LY3298176", "EX-101".
+_DEVELOPMENT_CODE = re.compile(r"^[a-z]{1,6}[- ]?\d[\w-]*(?: \d[\w-]*)?$", re.I)
+_PLAIN_NAME = re.compile(r"^[a-z][a-z -]*$", re.I)
 # Legal forms and group words that differ between the records naming one
 # company ("Takeda", "Takeda Pharmaceuticals U.S.A., Inc."). They are stripped
 # after punctuation, repeatedly, and never from a one-word name. KGaA stays:
@@ -39,6 +49,24 @@ def normalize_company_name(name: str) -> str:
 
 def normalize_molecule_name(name: str) -> str:
     return _clean(name).strip(" ,.;:")
+
+
+def is_obvious_biologic(name: str) -> bool:
+    return bool(_BIOLOGIC.search(name or ""))
+
+
+def is_development_code(name: str) -> bool:
+    return bool(_DEVELOPMENT_CODE.match((name or "").strip()))
+
+
+def nonproprietary_name(other_names: list[str]) -> str | None:
+    """Pick the name to use for a coded intervention from its other names.
+
+    ClinicalTrials.gov lists INNs in lower case and brands capitalised, so a
+    lower-case plain name wins, then any plain name; codes are never chosen.
+    """
+    plain = [name for name in other_names if _PLAIN_NAME.match(name) and not is_development_code(name)]
+    return next((name for name in plain if name == name.lower()), plain[0] if plain else None)
 
 
 def is_inactive_comparator(name: str) -> bool:
