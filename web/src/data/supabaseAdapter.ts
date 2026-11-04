@@ -76,9 +76,18 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
     runCoreQuery('companies', paged(signal => supabase!.from('companies').select('id,legal_name,normalized_name,domain,country,company_type').abortSignal(signal)), diagnostics, timeoutMs),
     runCoreQuery('molecules_count', signal => supabase!.from('molecules').select('id', { count: 'exact', head: true }).abortSignal(signal) as any, diagnostics, timeoutMs),
   ])
+  // Read soft merges before signals: after duplicate companies are merged, an
+  // opportunity can sit on the kept row while its signals sit on a merged twin.
+  // Optional so the dashboard keeps working before the soft-merge migration.
+  const companyMerges = await runOptionalQuery('company_merges', paged(signal => supabase!.from('companies').select('id,merged_into_company_id').not('merged_into_company_id', 'is', null).abortSignal(signal)), diagnostics, timeoutMs)
+  const survivorOf = resolveCompanyMerges(companyMerges.data ?? [])
+  const opportunityCompanies = new Set((allOpportunities.data ?? []).map((o: any) => survivorOf(o.company_id)).filter(Boolean))
+  const opportunityCompanyIds = Array.from(new Set([
+    ...(allOpportunities.data ?? []).map((o: any) => o.company_id),
+    ...(companyMerges.data ?? []).filter((row: any) => opportunityCompanies.has(survivorOf(row.id))).map((row: any) => row.id),
+  ].filter(Boolean)))
   // The dashboard shows evidence only for opportunity pairs, so read just the
-  // signals of those companies and molecules.
-  const opportunityCompanyIds = Array.from(new Set((allOpportunities.data ?? []).map((o: any) => o.company_id).filter(Boolean)))
+  // signals of those companies (with their merged twins) and molecules.
   const opportunityMoleculeIds = Array.from(new Set((allOpportunities.data ?? []).map((o: any) => o.molecule_id).filter(Boolean)))
   const signals = opportunityCompanyIds.length && opportunityMoleculeIds.length
     ? await runCoreQuery('signals', paged(signal => supabase!.from('signals').select('id,company_id,molecule_id,source_type,signal_type,source_url,source_record_id,evidence_text,event_date,confidence,base_weight,fingerprint').in('company_id', opportunityCompanyIds).in('molecule_id', opportunityMoleculeIds).order('event_date', { ascending: false }).abortSignal(signal)), diagnostics, timeoutMs)
@@ -87,10 +96,7 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
   // These reads enrich Contact 360, molecule intelligence and diagnostics. A
   // slow or unavailable secondary table must not make the executive dashboard
   // unusable; its named failure remains visible in loadDiagnostics.
-  const [companyMerges, opportunityContacts, contactEvidence, runs, runMetrics, sources, positions, education, works, problems, themes, jtbd, claims, notes, history, conflicts, researchRuns, targetedJobs, agentJobs, agentSubmissions, moleculeSections, researchClaims, researchEntities] = await Promise.all([
-    // Optional so the dashboard keeps working before the company soft-merge
-    // migration is applied; without it every company row stands alone.
-    runOptionalQuery('company_merges', paged(signal => supabase!.from('companies').select('id,merged_into_company_id').not('merged_into_company_id', 'is', null).abortSignal(signal)), diagnostics, secondaryTimeoutMs),
+  const [opportunityContacts, contactEvidence, runs, runMetrics, sources, positions, education, works, problems, themes, jtbd, claims, notes, history, conflicts, researchRuns, targetedJobs, agentJobs, agentSubmissions, moleculeSections, researchClaims, researchEntities] = await Promise.all([
     runOptionalQuery('opportunity_contacts', paged(signal => supabase!.from('opportunity_contacts').select('opportunity_id,contact_id,role_fit_score,rank,rationale').abortSignal(signal), ['opportunity_id', 'contact_id']), diagnostics, secondaryTimeoutMs),
     runOptionalQuery('contact_evidence', paged(signal => supabase!.from('contact_evidence').select('contact_id,source_url,evidence_type,observed_at,evidence_text,source_type,metadata_json').abortSignal(signal)), diagnostics, contactIntelligenceTimeoutMs),
     runOptionalQuery('crawl_runs', signal => supabase!.from('crawl_runs').select('id,started_at,completed_at,source_adapter,status,records_seen,records_inserted,errors,duration_seconds').order('started_at', { ascending: false }).limit(10).abortSignal(signal), diagnostics, secondaryTimeoutMs),
@@ -117,7 +123,6 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
     runOptionalQuery('research_entities', paged(signal => supabase!.from('research_entities').select('id,entity_type,canonical_name,metadata_json').abortSignal(signal)), diagnostics, secondaryTimeoutMs),
   ])
   const loadDiagnostics = { degraded: diagnostics.length > 0, codes: diagnostics }
-  const survivorOf = resolveCompanyMerges(companyMerges.data ?? [])
   const companyById = new Map((companies.data ?? []).map((company: any) => [company.id, company]))
   const intelTables = {sources: sources.data ?? [], evidence: contactEvidence.data ?? [], positions: positions.data ?? [], education: education.data ?? [], works: works.data ?? [], problems: problems.data ?? [], themes: themes.data ?? [], jtbd: jtbd.data ?? [], claims: claims.data ?? [], notes: notes.data ?? [], history: history.data ?? [], conflicts: conflicts.data ?? [], researchRuns: researchRuns.data ?? []}
   const contactEvidenceById = new Map<string, any[]>()

@@ -36,15 +36,45 @@ def _stale_opportunities(client, qualified_before: datetime | None) -> list[dict
     return _paged(query)
 
 
+def _company_members(client) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """Survivor of each soft-merged company, and every company id behind a survivor.
+
+    Merging duplicate company rows leaves an opportunity on the survivor while
+    its signals can sit on a merged twin, so signals are read for the whole group.
+    """
+    try:
+        rows = _paged(lambda: client.table("companies").select("id,merged_into_company_id"))
+    except Exception:
+        # Before the soft-merge migration the column does not exist: no merges.
+        return {}, {}
+    merged_into = {str(row["id"]): str(row["merged_into_company_id"]) for row in rows if row.get("merged_into_company_id")}
+
+    def survivor(company_id: str) -> str:
+        for _ in range(10):
+            if company_id not in merged_into:
+                break
+            company_id = merged_into[company_id]
+        return company_id
+
+    survivors = {company_id: survivor(company_id) for company_id in merged_into}
+    members: dict[str, list[str]] = defaultdict(list)
+    for company_id, root in survivors.items():
+        members[root].append(company_id)
+    return survivors, members
+
+
 def rescore_stale_opportunities(client, *, qualified_before: datetime | None, now: datetime | None = None, apply: bool = True) -> dict[str, Any]:
     """Rescore opportunities last qualified before ``qualified_before`` (all when None)."""
     now = now or datetime.now(timezone.utc)
+    survivors, members = _company_members(client)
     by_company: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in _stale_opportunities(client, qualified_before):
-        by_company[str(row["company_id"])].append(row)
+        company_id = str(row["company_id"])
+        by_company[survivors.get(company_id, company_id)].append(row)
     metrics = {"evaluated": 0, "rescored": 0, "unchanged": 0, "demoted": 0, "lapsed": 0, "without_signals": 0, "changes": []}
     for company_id, opportunities in by_company.items():
-        signal_rows = _paged(lambda: client.table("signals").select("*").eq("company_id", company_id))
+        group = [company_id, *members.get(company_id, [])]
+        signal_rows = _paged(lambda: client.table("signals").select("*").in_("company_id", group))
         # A company that sells impurities is excluded from every pair, as in the pipeline.
         is_vendor = any(row.get("signal_type") == "impurity_vendor_exclusion" for row in signal_rows)
         by_molecule: dict[str, list[Signal]] = defaultdict(list)
