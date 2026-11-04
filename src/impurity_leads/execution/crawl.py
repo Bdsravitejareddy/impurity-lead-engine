@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import httpx
 from impurity_leads.adapters.clinical_trials import ClinicalTrialsAdapter
 from impurity_leads.adapters.fda import FDAAdapter
+from impurity_leads.adapters.queries import CLINICAL_TRIALS_URL, FDA_PAGE_SIZE, FDA_URL, MAX_PAGES, clinical_trials_params, fda_params
 from impurity_leads.adapters.company_site import CompanySiteAdapter
 from impurity_leads.adapters.common_crawl import CommonCrawlAdapter
 from impurity_leads.contacts.discovery import contact_candidate_urls
@@ -36,21 +37,29 @@ class CrawlHandlers:
             return ctx.result
         source=ctx.task['identifier']
         with self.client(ctx) as client:
-            if source=='clinical_trials':
-                url='https://clinicaltrials.gov/api/v2/studies'
-                params={'query.term':'AREA[Phase]PHASE3 AND AREA[InterventionType]DRUG','pageSize':100,'format':'json'}
-                key,adapter='studies',ClinicalTrialsAdapter()
-            else:
-                url='https://api.fda.gov/drug/drugsfda.json';params={'limit':99}
-                key,adapter='results',FDAAdapter()
-            response=client.get(url,params=params,headers=_structured_headers(self.settings))
-            try: response.raise_for_status()
-            except httpx.HTTPStatusError as error: raise classify_error(error) from None
             records=[]
-            for payload in response.json().get(key,[]): records.extend(adapter.parse(payload))
+            if source=='clinical_trials':
+                adapter=ClinicalTrialsAdapter();token=None
+                for _ in range(MAX_PAGES):
+                    payload=self._structured_page(client,CLINICAL_TRIALS_URL,clinical_trials_params(token))
+                    for study in payload.get('studies',[]): records.extend(adapter.parse(study))
+                    token=payload.get('nextPageToken')
+                    if not token: break
+            else:
+                adapter=FDAAdapter()
+                for page in range(MAX_PAGES):
+                    results=self._structured_page(client,FDA_URL,fda_params(page)).get('results',[])
+                    for result in results: records.extend(adapter.parse(result))
+                    if len(results)<FDA_PAGE_SIZE: break
             result={'records':[r.model_dump(mode='json') for r in records]}
             ctx.save_progress({'fetched':True},result)
             return result
+    def _structured_page(self,client,url,params):
+        from impurity_leads.cli import _structured_headers
+        response=client.get(url,params=params,headers=_structured_headers(self.settings))
+        try: response.raise_for_status()
+        except httpx.HTTPStatusError as error: raise classify_error(error) from None
+        return response.json()
     def _robots(self,client,domain):
         base=f'https://{domain}'
         response=client.get(base+'/robots.txt',headers={'User-Agent':self.settings.user_agent})

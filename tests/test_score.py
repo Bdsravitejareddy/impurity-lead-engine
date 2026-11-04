@@ -36,7 +36,8 @@ def test_urgency_bonus_is_applied_once_from_newest_event():
 def test_score_uses_single_newest_event_urgency_bonus():
     now = datetime.now(timezone.utc)
     signals = [make_signal(35, 500), make_signal(18, 30)]
-    assert score_signals(signals, now=now) == 68
+    # 35 + 18/2 for a repeated type, plus one urgency bonus of 15.
+    assert score_signals(signals, now=now) == 59
 
 
 def test_vendor_exclusion_zeroes_score():
@@ -52,7 +53,7 @@ def test_unknown_date_has_no_urgency_bonus():
 def test_duplicate_source_family_does_not_add_diversity():
     signals = [make_signal(35), make_signal(18)]
     signals[1].source_type = "job"
-    assert score_signals(signals, now=datetime.now(timezone.utc)) == 68
+    assert score_signals(signals, now=datetime.now(timezone.utc)) == 59
 
 
 def test_threshold_boundaries_remain_review_high_hot():
@@ -60,3 +61,42 @@ def test_threshold_boundaries_remain_review_high_hot():
     assert score_signals([make_signal(50, 800)], now=now) == 50
     assert score_signals([make_signal(65, 800)], now=now) == 65
     assert score_signals([make_signal(80, 800)], now=now) == 80
+
+
+def _typed(signal_type: str, weight: int, days_old: int = 0) -> Signal:
+    signal = make_signal(weight, days_old)
+    signal.signal_type = signal_type
+    signal.fingerprint = f"{signal_type}-{weight}-{days_old}-{id(signal)}"
+    return signal
+
+
+def test_volume_of_context_records_cannot_reach_hot():
+    from impurity_leads.aggregate import _priority
+
+    filings = [_typed("regulatory_application", 22) for _ in range(5)]
+    for signal in filings:
+        signal.event_date = None
+    score = score_signals(filings)
+    assert score == 35
+    assert _priority(score, {"regulatory_application"}) is None
+
+
+def test_hot_and_high_require_impurity_evidence():
+    from impurity_leads.aggregate import _priority
+
+    assert _priority(85, {"phase_iii", "regulatory_application"}) == "REVIEW"
+    assert _priority(85, {"phase_iii", "impurity_characterization"}) == "HOT"
+    assert _priority(70, {"method_validation"}) == "REVIEW"
+    assert _priority(70, {"degradation_product"}) == "HIGH"
+
+
+def test_aggregation_groups_display_variants_of_one_pair():
+    from impurity_leads.aggregate import aggregate_candidates
+
+    first = _typed("impurity_characterization", 38)
+    second = _typed("reference_standard", 60)
+    first.company_name, first.molecule_name = "Pfizer", "Tofacitinib"
+    second.company_name, second.molecule_name = "Pfizer Inc", "tofacitinib"
+    candidates = aggregate_candidates([first, second])
+    assert len(candidates) == 1
+    assert candidates[0]["score"] == min(100, 38 + 60 + 15)

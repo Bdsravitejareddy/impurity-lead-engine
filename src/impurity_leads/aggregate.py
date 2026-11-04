@@ -1,7 +1,8 @@
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from impurity_leads.models import Opportunity, Signal
-from impurity_leads.score import score_signals
+from impurity_leads.normalize import normalize_company_name, normalize_molecule_name
+from impurity_leads.score import IMPURITY_SIGNAL_TYPES, score_signals
 
 _ROLE_MAP = {
     "impurity_characterization": ["Head/Director Analytical R&D"],
@@ -14,9 +15,12 @@ _ROLE_MAP = {
 
 
 def _priority(score: int, signal_types: set[str]) -> str | None:
-    if score >= 80 or "direct_impurity_rfq" in signal_types:
+    if "direct_impurity_rfq" in signal_types:
         return "HOT"
-    if score >= 65:
+    has_impurity_evidence = bool(signal_types & IMPURITY_SIGNAL_TYPES)
+    if score >= 80 and has_impurity_evidence:
+        return "HOT"
+    if score >= 65 and has_impurity_evidence:
         return "HIGH"
     if score >= 50:
         return "REVIEW"
@@ -34,13 +38,17 @@ def aggregate_candidates(signals: list[Signal]) -> list[dict]:
     metadata allows later signals to rescore and promote the same pair without
     creating a duplicate opportunity.
     """
+    # Group on the same normalized keys storage upserts on; grouping on display
+    # strings split "Pfizer" and "Pfizer Inc" into rival scores for one row.
     grouped: dict[tuple[str, str], list[Signal]] = defaultdict(list)
     for signal in signals:
         if signal.company_name and signal.molecule_name:
-            grouped[(signal.company_name, signal.molecule_name)].append(signal)
+            grouped[(normalize_company_name(signal.company_name), normalize_molecule_name(signal.molecule_name))].append(signal)
 
     output: list[dict] = []
-    for (company, molecule), group in grouped.items():
+    for group in grouped.values():
+        company = Counter(s.company_name for s in group).most_common(1)[0][0]
+        molecule = Counter(s.molecule_name for s in group).most_common(1)[0][0]
         unique = list({s.fingerprint: s for s in group}.values())
         score = score_signals(unique)
         signal_types = {s.signal_type for s in unique}

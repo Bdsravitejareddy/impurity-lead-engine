@@ -8,6 +8,7 @@ from impurity_leads.adapters.clinical_trials import ClinicalTrialsAdapter
 from impurity_leads.adapters.company_site import CompanySiteAdapter
 from impurity_leads.adapters.common_crawl import CommonCrawlAdapter
 from impurity_leads.adapters.fda import FDAAdapter
+from impurity_leads.adapters.queries import CLINICAL_TRIALS_URL, FDA_PAGE_SIZE, FDA_URL, MAX_PAGES, clinical_trials_params, fda_params
 from impurity_leads.config import Settings, load_settings
 from impurity_leads.contacts.discovery import contact_candidate_urls
 from impurity_leads.contacts.models import RankedContact
@@ -65,34 +66,30 @@ def fetch_structured_records(client, settings: Settings | None = None) -> list[S
     records: list[SourceRecord] = []
 
     try:
-        trials_response = client.get(
-            "https://clinicaltrials.gov/api/v2/studies",
-            params={
-                "query.term": "AREA[Phase]PHASE3 AND AREA[InterventionType]DRUG",
-                "pageSize": 100,
-                "format": "json",
-            },
-            headers=headers,
-        )
-        trials_response.raise_for_status()
-        trials_payload = trials_response.json()
         trial_adapter = ClinicalTrialsAdapter()
-        for study in trials_payload.get("studies", []):
-            records.extend(trial_adapter.parse(study))
+        page_token = None
+        for _ in range(MAX_PAGES):
+            trials_response = client.get(CLINICAL_TRIALS_URL, params=clinical_trials_params(page_token), headers=headers)
+            trials_response.raise_for_status()
+            trials_payload = trials_response.json()
+            for study in trials_payload.get("studies", []):
+                records.extend(trial_adapter.parse(study))
+            page_token = trials_payload.get("nextPageToken")
+            if not page_token:
+                break
     except Exception as error:
         _log_source_http_error("clinical_trials", error)
 
     try:
-        fda_response = client.get(
-            "https://api.fda.gov/drug/drugsfda.json",
-            params={"limit": 99},
-            headers=headers,
-        )
-        fda_response.raise_for_status()
-        fda_payload = fda_response.json()
         fda_adapter = FDAAdapter()
-        for result in fda_payload.get("results", []):
-            records.extend(fda_adapter.parse(result))
+        for page in range(MAX_PAGES):
+            fda_response = client.get(FDA_URL, params=fda_params(page), headers=headers)
+            fda_response.raise_for_status()
+            results = fda_response.json().get("results", [])
+            for result in results:
+                records.extend(fda_adapter.parse(result))
+            if len(results) < FDA_PAGE_SIZE:
+                break
     except Exception as error:
         _log_source_http_error("fda", error)
 

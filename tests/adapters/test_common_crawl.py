@@ -34,3 +34,11 @@ def test_discover_uses_latest_index_and_filters_results():
     from impurity_leads.adapters.common_crawl import CommonCrawlAdapter
     adapter = CommonCrawlAdapter(client=FakeClient(), sleep_fn=lambda _: None)
     assert adapter.discover("example.com") == ["https://example.com/jobs/scientist"]
+
+
+def test_domain_prefix_is_removed_as_a_prefix_not_a_character_set():
+    from impurity_leads.adapters.common_crawl import filter_index_records
+
+    records = [{"url": "https://w.ockhardt.com/careers/impurity"}, {"url": "https://www.wockhardt.com/careers/impurity"}]
+    # lstrip("www.") stripped characters, so "w.ockhardt.com" matched "wockhardt.com".
+    assert [r["url"] for r in filter_index_records(records, "wockhardt.com", ("careers",))] == ["https://www.wockhardt.com/careers/impurity"]

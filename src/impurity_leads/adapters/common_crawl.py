@@ -25,14 +25,14 @@ def filter_index_records(
     domain: str,
     url_terms: tuple[str, ...] = DEFAULT_TERMS,
 ) -> list[dict]:
-    normalized_domain = domain.lower().lstrip("www.")
+    normalized_domain = domain.lower().removeprefix("www.")
     output: list[dict] = []
     for record in records:
         url = record.get("url")
         if not url:
             continue
         parsed = urlparse(url)
-        host = parsed.netloc.lower().lstrip("www.")
+        host = parsed.netloc.lower().removeprefix("www.")
         if host != normalized_domain:
             continue
         haystack = f"{parsed.path}?{parsed.query}".lower()

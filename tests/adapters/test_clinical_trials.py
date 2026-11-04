@@ -24,3 +24,30 @@ def test_trial_parser_skips_placebo_and_vehicle_arms():
     }}
     records = ClinicalTrialsAdapter().parse(payload)
     assert [record.molecule_name_raw for record in records] == ["EX-101"]
+
+
+def _study(sponsor_class="INDUSTRY", status="RECRUITING", phases=("PHASE3",), interventions=(("DRUG", "EX-101"),), collaborators=()):
+    return {"protocolSection": {
+        "identificationModule": {"nctId": "NCT00000002", "briefTitle": "Example"},
+        "statusModule": {"overallStatus": status},
+        "sponsorCollaboratorsModule": {"leadSponsor": {"name": "Lead Org", "class": sponsor_class}, "collaborators": [{"name": n, "class": c} for n, c in collaborators]},
+        "designModule": {"phases": list(phases)},
+        "armsInterventionsModule": {"interventions": [{"type": t, "name": n} for t, n in interventions]},
+    }}
+
+
+def test_academic_sponsor_is_not_a_buyer_unless_industry_collaborates():
+    assert ClinicalTrialsAdapter().parse(_study(sponsor_class="OTHER")) == []
+    records = ClinicalTrialsAdapter().parse(_study(sponsor_class="OTHER", collaborators=[("Example Pharma", "INDUSTRY")]))
+    assert records[0].company_name_raw == "Example Pharma"
+
+
+def test_withdrawn_and_terminated_trials_are_skipped():
+    assert ClinicalTrialsAdapter().parse(_study(status="WITHDRAWN")) == []
+    assert ClinicalTrialsAdapter().parse(_study(status="TERMINATED")) == []
+
+
+def test_phase_two_three_trial_uses_latest_phase_and_clean_names():
+    records = ClinicalTrialsAdapter().parse(_study(phases=("PHASE2", "PHASE3"), interventions=(("DRUG", "Abrocitinib 100 mg"), ("DRUG", "Abrocitinib 200 mg"))))
+    assert [record.molecule_name_raw for record in records] == ["Abrocitinib"]
+    assert records[0].metadata_json["phase"] == "PHASE3"
