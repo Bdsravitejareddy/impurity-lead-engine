@@ -48,6 +48,12 @@ class PostgresTaskStore(SupabaseTaskStore):
                 "select to_jsonb(t) from public.crawl_tasks t where run_id=%s order by task_key",
                 (self.run["id"],))]
 
+    def company_aliases(self):
+        from impurity_leads.storage.supabase_store import company_alias_map
+        with psycopg.connect(self.uri, autocommit=True) as conn:
+            conn.execute("set role service_role")
+            return company_alias_map([row[0] for row in conn.execute("select to_jsonb(c) from public.companies c")])
+
 
 def fixture_client(ctx):
     def handler(request):

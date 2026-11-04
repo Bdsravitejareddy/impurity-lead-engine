@@ -39,8 +39,8 @@ class RowCollector:
         return Table()
 
 
-def publication_rows(signals, opportunities, contact_map, candidates=()):
-    collector=RowCollector();store=SupabaseLeadStore(collector)
+def publication_rows(signals, opportunities, contact_map, candidates=(), company_aliases=None):
+    collector=RowCollector();store=SupabaseLeadStore(collector,company_aliases=company_aliases or {})
     for item in signals:store.save_signal(item)
     for candidate in candidates:store.save_candidate(candidate)
     for item in opportunities:
@@ -156,7 +156,9 @@ def execute_run(store,settings,seeds,output_dir,*,workers=6,reporter=None,client
             contact_map[(item['company_name'],item['molecule_name'])]=[RankedContact.model_validate(c) for c in item['ranked']]
     metrics['contacts']=len({(name,c.contact.normalized_name) for (name,_),contacts in contact_map.items() for c in contacts})
     def persist(ctx):
-        rows=publication_rows(signals,opportunities,contact_map,candidates)
+        # Re-keyed and soft-merged companies resolve to their stored survivor row.
+        aliases=store.company_aliases() if hasattr(store,'company_aliases') else None
+        rows=publication_rows(signals,opportunities,contact_map,candidates,aliases)
         for index in range(ctx.checkpoint.get('index',0),len(rows),50):
             ctx.check()
             cp={'index':min(index+50,len(rows))}

@@ -9,7 +9,17 @@ _QUALIFIER = re.compile(r"\b(?:high|low|medium|mid|standard|reduced|fixed)[\s-]d
 _DOSAGE_FORM = re.compile(r"\s+(?:for\s+)?(?:injection|infusion|tablets?|capsules?|cream|ointment|gel|oral solution|solution|suspension|patch)$", re.I)
 # Regimens and care descriptions are recorded as DRUG interventions but name no molecule.
 _NON_MOLECULE = re.compile(r"\b(?:chemotherapy|standard of care|best supportive care|usual care|investigator'?s choice)\b", re.I)
-_COMPANY_SUFFIX = re.compile(r"\b(incorporated|inc|limited|ltd|llc|plc|corp|corporation|co)\.?$", re.I)
+# Legal forms and group words that differ between the records naming one
+# company ("Takeda", "Takeda Pharmaceuticals U.S.A., Inc."). They are stripped
+# after punctuation, repeatedly, and never from a one-word name. KGaA stays:
+# Merck KGaA and Merck & Co. are different companies.
+# supabase/migrations/20261104130000_company_normalization.sql mirrors this list.
+COMPANY_SUFFIXES = (
+    "incorporated", "inc", "limited", "ltd", "llc", "llp", "lp", "plc", "corporation", "corp", "co",
+    "ag", "gmbh", "kg", "sa", "nv", "bv", "se", "kk", "pvt", "private", "spa", "srl", "ab", "a s",
+    "holdings", "holding", "usa", "us", "pharmaceuticals", "pharmaceutical", "pharma",
+)
+_COMPANY_SUFFIX = re.compile(r"\s+(?:" + "|".join(COMPANY_SUFFIXES) + r")$")
 
 
 def _clean(value: str) -> str:
@@ -17,9 +27,14 @@ def _clean(value: str) -> str:
 
 
 def normalize_company_name(name: str) -> str:
-    value = re.sub(r"[,]+", "", _clean(name))
-    value = _COMPANY_SUFFIX.sub("", value).strip(" .")
-    return re.sub(r"\s+", " ", value)
+    # "U.S.A." -> "usa", "Reddy's" -> "reddys", "A/S" -> "a s", "Hoffmann-La" -> "hoffmann la".
+    value = re.sub(r"[.'\u2019]", "", (name or "").lower())
+    value = re.sub(r"[\W_]+", " ", value).strip()
+    while True:
+        stripped = _COMPANY_SUFFIX.sub("", value)
+        if stripped == value:
+            return value
+        value = stripped
 
 
 def normalize_molecule_name(name: str) -> str:

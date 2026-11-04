@@ -173,3 +173,85 @@ def test_store_reuses_existing_canonical_contact_for_academic_suffix_variant():
     ranked.contact.normalized_name = "benjamin roembke"
     store.save_contact("Teva Pharmaceuticals", ranked)
     assert client.tables["contacts"].rows[0][0]["id"] == "canonical"
+
+
+class SelectableTable(FakeTable):
+    def __init__(self, data):
+        super().__init__()
+        self.data = data
+        self.window = None
+    def select(self, columns):
+        return self
+    def range(self, start, end):
+        self.window = (start, end)
+        return self
+    def execute(self):
+        if self.window is None:
+            return super().execute()
+        start, end = self.window
+        self.window = None
+        return type("Result", (), {"data": self.data[start:end + 1]})()
+
+
+LEGACY_COMPANIES = [
+    {"id": "bayer-id", "normalized_name": "bayer", "merged_into_company_id": "bayer-ag-id"},
+    {"id": "bayer-ag-id", "normalized_name": "bayer ag", "merged_into_company_id": None},
+    {"id": "takeda-id", "normalized_name": "takeda", "merged_into_company_id": "takeda-usa-id"},
+    {"id": "takeda-usa-id", "normalized_name": "takeda pharmaceuticals u.s.a.", "merged_into_company_id": None},
+]
+
+
+def _signal(company):
+    return Signal(company_name=company, molecule_name="Drug X", source_type="job", signal_type="stability",
+                  source_url="https://example.com/1", evidence_text="e", discovered_at=datetime.now(timezone.utc),
+                  base_weight=20, confidence=1.0, fingerprint=f"fp-{company}")
+
+
+def test_company_alias_map_resolves_new_keys_to_surviving_rows():
+    from impurity_leads.storage.supabase_store import company_alias_map
+
+    aliases = company_alias_map(LEGACY_COMPANIES)
+    assert aliases["bayer"] == ("bayer-ag-id", "bayer ag")
+    assert aliases["takeda"] == ("takeda-usa-id", "takeda pharmaceuticals u.s.a.")
+
+
+def test_store_writes_legacy_company_rows_instead_of_orphaning_them():
+    from impurity_leads.storage.supabase_store import _stable_uuid, company_alias_map
+
+    client = FakeClient()
+    store = SupabaseLeadStore(client, company_aliases=company_alias_map(LEGACY_COMPANIES))
+    store.save_signal(_signal("Bayer AG"))
+    store.save_signal(_signal("Takeda Pharmaceuticals USA, Inc."))
+    store.save_signal(_signal("Brand New Pharma GmbH"))
+    signal_companies = [row["company_id"] for row, _ in client.tables["signals"].rows]
+    assert signal_companies == ["bayer-ag-id", "takeda-usa-id", str(_stable_uuid("company", "brand new"))]
+    companies = [row for row, _ in client.tables["companies"].rows]
+    # An existing survivor keeps its stored key and legal name.
+    assert companies[0] == {"id": "bayer-ag-id", "normalized_name": "bayer ag", "last_seen_at": companies[0]["last_seen_at"]}
+    assert companies[2]["normalized_name"] == "brand new"
+
+
+def test_store_opportunity_and_contact_links_use_the_surviving_company():
+    from impurity_leads.storage.supabase_store import _stable_uuid, company_alias_map
+
+    client = FakeClient()
+    store = SupabaseLeadStore(client, company_aliases=company_alias_map(LEGACY_COMPANIES))
+    opportunity = Opportunity(company_name="Bayer", molecule_name="Drug X", score=80, priority="HOT",
+                              likely_need_type=[], rationale="r", decision_maker_role=[], signal_fingerprints=[])
+    store.save_opportunity(opportunity)
+    row = client.tables["opportunities"].rows[0][0]
+    molecule_id = str(_stable_uuid("molecule", "drug x"))
+    assert row["company_id"] == "bayer-ag-id"
+    assert row["id"] == str(_stable_uuid("opportunity", f"bayer-ag-id:{molecule_id}"))
+    assert store._opportunity_id(opportunity) == row["id"]
+
+
+def test_store_loads_company_aliases_lazily_across_pages():
+    client = FakeClient()
+    rows = [{"id": f"c{i}", "normalized_name": f"company {i}", "merged_into_company_id": None} for i in range(1500)]
+    rows.append({"id": "legacy", "normalized_name": "acme", "merged_into_company_id": "acme-ag"})
+    rows.append({"id": "acme-ag", "normalized_name": "acme ag", "merged_into_company_id": None})
+    client.tables["companies"] = SelectableTable(rows)
+    store = SupabaseLeadStore(client)
+    store.save_signal(_signal("ACME AG"))
+    assert client.tables["signals"].rows[0][0]["company_id"] == "acme-ag"

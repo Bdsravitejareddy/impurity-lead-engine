@@ -42,3 +42,19 @@ def test_daily_graph_persists_and_exports_without_repeating_completed_tasks(tmp_
 def test_live_daily_requires_supabase_and_never_falls_back(tmp_path):
     from impurity_leads.execution.daily import run_daily
     assert run_daily(Settings(),tmp_path,workers=1)==2
+
+
+def test_daily_publication_writes_to_the_surviving_company_row(tmp_path):
+    from impurity_leads.storage.supabase_store import company_alias_map
+    store=MemoryTasks();store.published=[]
+    store.publish=lambda task,rows,checkpoint:store.published.extend(rows)
+    store.company_aliases=lambda:company_alias_map([
+        {'id':'legacy-example','normalized_name':'example pharma','merged_into_company_id':'survivor'},
+        {'id':'survivor','normalized_name':'example pharmaceuticals inc','merged_into_company_id':None}])
+    seeds=[CompanySeed('Example Pharma','example.com',['Drug X'])]
+    settings=Settings(per_domain_delay_seconds=0,scheduler_poll_seconds=.001)
+    assert execute_run(store,settings,seeds,tmp_path,client_factory=fixture_client,workers=2)==0
+    example=[r['row'] for r in store.published if r['table'] in {'signals','opportunities'} and r['row'].get('company_id') in {'survivor','legacy-example'}]
+    assert example and {row['company_id'] for row in example}=={'survivor'}
+    companies=[r['row'] for r in store.published if r['table']=='companies' and r['row']['id']=='survivor']
+    assert companies and all(row['normalized_name']=='example pharmaceuticals inc' and 'legal_name' not in row for row in companies)
