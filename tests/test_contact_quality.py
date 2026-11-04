@@ -97,3 +97,12 @@ def test_rescore_reports_assumed_roles_and_skips_merged_contacts():
     assert changes[0]["before"]["current_role"] == 82.0
     assert changes[0]["after"]["basis"] == "ASSUMED"
     assert rescore.summarize(changes)["current_role_basis"] == {"ASSUMED": 1}
+
+
+def test_dated_affiliation_department_dates_the_role_without_a_title():
+    from datetime import date
+    source = {"source_type": "Scientific publication", "status": "USED", "source_date": "2026-03-01", "source_kind": "MOLECULE_DISCOVERY"}
+    result = score_contact({"department": "Analytical Chemistry in Development and Supply"}, sources=[source], today=date(2026, 11, 4))
+    assert result["basis"]["current_role"] == "SOURCE_DATED"
+    assert result["dimensions"]["current_role"] == 85.0
+    assert score_contact({}, sources=[source], today=date(2026, 11, 4))["basis"]["current_role"] == "ASSUMED"

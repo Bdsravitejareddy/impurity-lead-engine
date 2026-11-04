@@ -19,3 +19,12 @@ def test_common_name_without_target_affiliation_is_not_promoted():
 def test_candidate_ranking_rewards_direct_technical_context_and_corresponding_author():
     candidate = extract_authors({"authorList": {"author": [{"fullName": "A Person", "correspondingAuthor": True}]}}, technical_text="impurity degradation analytical method")[0]
     assert rank_candidate(candidate, company_match=True) >= 70
+
+
+def test_core_europe_pmc_author_affiliation_and_orcid_are_read():
+    item = {"authorList": {"author": [{"fullName": "Zheng J", "firstName": "Jinjian", "lastName": "Zheng",
+                                       "authorId": {"type": "ORCID", "value": "0000-0003-0865-815X"},
+                                       "authorAffiliationDetailsList": {"authorAffiliation": [{"affiliation": "Analytical Chemistry, Merck & Co., Inc."}]}}]}}
+    candidate = extract_authors(item)[0]
+    assert candidate.orcid == "0000-0003-0865-815X"
+    assert candidate.affiliation == "Analytical Chemistry, Merck & Co., Inc."

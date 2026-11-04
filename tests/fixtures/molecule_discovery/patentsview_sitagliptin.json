@@ -1,0 +1,38 @@
+{
+ "_note": "Hand-built in the documented PatentSearch API response shape (no API key was available to record). Inventor names are fictional.",
+ "error": false,
+ "count": 3,
+ "total_hits": 3,
+ "patents": [
+  {
+   "patent_id": "99000001",
+   "patent_title": "Process for preparing sitagliptin with reduced nitroso impurity",
+   "patent_abstract": "A process for the preparation of sitagliptin phosphate in which the N-nitroso impurity is controlled below the acceptable intake.",
+   "patent_date": "2025-03-11",
+   "application": [{"filing_date": "2022-06-14"}],
+   "assignees": [{"assignee_organization": "Merck Sharp & Dohme LLC"}, {"assignee_organization": "Merck & Co., Inc."}],
+   "inventors": [
+    {"inventor_name_first": "Example", "inventor_name_last": "Inventorone", "inventor_city": "Rahway", "inventor_country": "US"},
+    {"inventor_name_first": "Jinjian", "inventor_name_last": "Zheng", "inventor_city": "Rahway", "inventor_country": "US"}
+   ]
+  },
+  {
+   "patent_id": "99000002",
+   "patent_title": "Sitagliptin process for preparation of intermediates",
+   "patent_abstract": "Preparation of sitagliptin intermediates.",
+   "patent_date": "2024-01-02",
+   "application": [],
+   "assignees": [{"assignee_organization": "Unrelated Generics Ltd"}],
+   "inventors": [{"inventor_name_first": "Other", "inventor_name_last": "Assigneeperson", "inventor_city": "Pune", "inventor_country": "IN"}]
+  },
+  {
+   "patent_id": "99000003",
+   "patent_title": "Method of treating type 2 diabetes with sitagliptin",
+   "patent_abstract": "Methods of treatment using sitagliptin in combination with metformin.",
+   "patent_date": "2023-05-09",
+   "application": [{"filing_date": "2021-02-01"}],
+   "assignees": [{"assignee_organization": "Merck & Co., Inc."}],
+   "inventors": [{"inventor_name_first": "Clinical", "inventor_name_last": "Usepatentee", "inventor_city": "Rahway", "inventor_country": "US"}]
+  }
+ ]
+}

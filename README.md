@@ -49,6 +49,16 @@ The project is designed around free public data and free tiers only:
 
 GitHub Actions has a 45-minute hard timeout for the daily workflow and the application has a 42-minute internal budget. Contact enrichment runs only after lead scoring, only for the top 30 HOT/HIGH opportunities, and fetches at most 12 contact-oriented pages per seeded company. Supabase stores only normalized structured data and compact evidence snippets; raw HTML/WARC bodies are not persisted.
 
+### Molecule-first contact discovery
+
+`impurity_leads.molecule_discovery` (daily stage `molecule_discovery`, off unless `MOLECULE_DISCOVERY_ENABLED=true`) finds people with dated, person-direct work on a HOT/HIGH opportunity's molecule at its company, using free APIs only:
+
+- Europe PMC papers on the molecule with impurity/degradation-product/stability-indicating terms; only authors whose own affiliation names the company are kept, dated by the publication date. When that finds fewer than three people, the company's own impurity/stability authors from the last five years (any molecule, at most five) are added, ranked lower and labelled as off-molecule.
+- ORCID public API (no key) for authors with an ORCID iD: dated employment at the company becomes `contact_positions`; a record showing they left keeps the contact but does not link it to the opportunity.
+- USPTO PatentsView inventors on company-assigned process/impurity patents for the molecule, only when the free `PATENTSVIEW_API_KEY` is set.
+
+Sources go to `contact_sources` with `source_kind = MOLECULE_DISCOVERY` and the record's own date, so `score_contact` dates the role (`SOURCE_DATED`). Requests are throttled per host (`CRAWLER_PER_DOMAIN_DELAY_SECONDS`), capped per run (`MOLECULE_DISCOVERY_MAX_REQUESTS`) and counted in provider usage. Test fixtures are refreshed with `scripts/record_molecule_discovery_fixtures.py`.
+
 ## Access and crawling rules
 
 Direct website crawling must:

@@ -62,6 +62,10 @@ def provider_for_url(url: str) -> str:
         return "clinicaltrials_gov"
     if "commoncrawl.org" in value:
         return "common_crawl"
+    if "orcid.org" in value:
+        return "orcid"
+    if "patentsview.org" in value:
+        return "patentsview"
     if "patents.google.com" in value:
         return "google_patents"
     if "api.openai.com" in value:

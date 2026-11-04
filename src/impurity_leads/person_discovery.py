@@ -33,6 +33,20 @@ def publication_metadata(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _core_affiliation(author: dict[str, Any]) -> str | None:
+    """Europe PMC ``resultType=core`` nests affiliations per author."""
+    rows = (author.get("authorAffiliationDetailsList") or {}).get("authorAffiliation") or []
+    values = [str(row.get("affiliation")) for row in rows if isinstance(row, dict) and row.get("affiliation")]
+    return " | ".join(values) or None
+
+
+def _core_orcid(author: dict[str, Any]) -> str | None:
+    identifier = author.get("authorId") or {}
+    if isinstance(identifier, dict) and str(identifier.get("type") or "").upper() == "ORCID":
+        return identifier.get("value")
+    return None
+
+
 def extract_authors(item: dict[str, Any], *, technical_text: str = "") -> list[PersonCandidate]:
     authors = (item.get("authorList") or {}).get("author") or item.get("authors") or []
     if isinstance(authors, dict):
@@ -48,13 +62,13 @@ def extract_authors(item: dict[str, Any], *, technical_text: str = "") -> list[P
         name = str(author.get("fullName") or " ".join(filter(None, (author.get("firstName"), author.get("lastName"))))).strip()
         if not name or len(normalize_person_name(name).split()) < 2:
             continue
-        affiliation = author.get("affiliation") or author.get("affiliationText")
+        affiliation = author.get("affiliation") or author.get("affiliationText") or _core_affiliation(author)
         result.append(PersonCandidate(
             name=name[:250],
             given_name=author.get("firstName"),
             family_name=author.get("lastName"),
             affiliation=str(affiliation)[:1000] if affiliation else None,
-            orcid=author.get("orcid") or author.get("ORCID"),
+            orcid=author.get("orcid") or author.get("ORCID") or _core_orcid(author),
             author_order=index + 1,
             corresponding=bool(author.get("correspondingAuthor") or author.get("corresponding")),
             source_date=item.get("firstPublicationDate") or item.get("pubYear"),

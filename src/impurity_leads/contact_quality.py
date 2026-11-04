@@ -96,7 +96,9 @@ def score_contact(contact: dict[str, Any], *, sources: Iterable[dict[str, Any]] 
     current_role = _as_percent(contact.get("current_role_confidence"))
     basis["current_role"] = "MEASURED"
     if current_role is None:
-        if contact.get("title") and newest_age is not None:
+        # A dated source naming the person's department at the company (a
+        # paper affiliation) dates the role even when no job title is known.
+        if (contact.get("title") or contact.get("department")) and newest_age is not None:
             current_role, basis["current_role"] = _age_score(newest_age), "SOURCE_DATED"
         else:
             current_role, basis["current_role"] = (40.0 if contact.get("title") else 20.0), "ASSUMED"

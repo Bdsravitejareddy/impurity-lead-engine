@@ -49,6 +49,13 @@ class Settings(BaseModel):
     max_research_documents: int = Field(default=30, ge=1, le=200)
     max_research_people: int = Field(default=15, ge=1, le=100)
     min_marginal_quality_gain: float = Field(default=3, ge=0, le=100)
+    # Molecule-first contact discovery (Europe PMC, ORCID, PatentsView). Off
+    # until an operator enables it; PatentsView is skipped without a free key.
+    molecule_discovery_enabled: bool = False
+    molecule_discovery_max_opportunities: int = Field(default=10, ge=1, le=100)
+    molecule_discovery_max_papers: int = Field(default=10, ge=1, le=25)
+    molecule_discovery_max_requests: int = Field(default=120, ge=1, le=1000)
+    patentsview_api_key: str | None = Field(default=None, repr=False)
 
 
     @model_validator(mode='after')
@@ -63,7 +70,7 @@ class Settings(BaseModel):
 def load_settings() -> Settings:
     values = {}
     for name in Settings.model_fields:
-        env_name = name.upper() if name.startswith(('supabase_', 'openai_', 'ai_', 'daily_', 'min_', 'max_', 'zero_cost_')) else 'CRAWLER_' + name.upper()
+        env_name = name.upper() if name.startswith(('supabase_', 'openai_', 'ai_', 'daily_', 'min_', 'max_', 'zero_cost_', 'molecule_', 'patentsview_')) else 'CRAWLER_' + name.upper()
         value = os.getenv(env_name)
         if value:
             values[name] = value

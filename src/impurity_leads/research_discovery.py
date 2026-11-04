@@ -48,8 +48,10 @@ class EuropePmcProvider(DiscoveryProvider):
             identifier = item.get("pmid") or item.get("id")
             if not identifier:
                 continue
+            # Preprints and patents carry a non-MED source; their id is not a PMID.
+            source = str(item.get("source") or "MED") if not item.get("pmid") else "MED"
             results.append(SearchResult(
-                url=f"https://europepmc.org/article/MED/{identifier}",
+                url=f"https://europepmc.org/article/{source}/{identifier}",
                 title=str(item.get("title") or "Europe PMC result"),
                 snippet=str(item.get("abstractText") or "")[:500],
                 domain="europepmc.org",
