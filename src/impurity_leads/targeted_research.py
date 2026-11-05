@@ -5,10 +5,13 @@ caller owns source validation, canonical writes and graph persistence.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Protocol
 
 from impurity_leads.contact_quality import QualityConfig, score_contact
+import httpx
+
 from impurity_leads.research_discovery import SearchRequest, SearchResult, dedupe_results
 
 
@@ -111,6 +114,28 @@ def targeted_query_plan(opportunity: dict[str, Any], coverage: OpportunityCovera
     return plans
 
 
+def _transient(error: Exception) -> bool:
+    if isinstance(error, (httpx.TimeoutException, httpx.TransportError)):
+        return True
+    if isinstance(error, httpx.HTTPStatusError):
+        return error.response.status_code == 429 or error.response.status_code >= 500
+    return False
+
+
+def discover_with_retry(provider, request: SearchRequest, *, attempts: int = 2, pause: float = 5.0,
+                        sleep: Callable[[float], None] = time.sleep) -> list[SearchResult]:
+    """One retry for a temporary provider failure (timeout, 429, 5xx); a single
+    blip used to end the whole job as PROVIDER_ERROR."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return provider.discover(request)
+        except Exception as error:
+            if attempt == attempts or not _transient(error):
+                raise
+            sleep(pause * attempt)
+    return []
+
+
 def run_targeted_rounds(
     opportunity: dict[str, Any],
     contacts: list[dict[str, Any]],
@@ -135,7 +160,7 @@ def run_targeted_rounds(
             return {"status": "STOPPED", "stop_reason": "NO_SEARCHABLE_DIMENSION", "coverage": current, "rounds": rounds}
         request = requests[0]
         try:
-            found = dedupe_results(provider.discover(request))[:budget.max_sources]
+            found = dedupe_results(discover_with_retry(provider, request))[:budget.max_sources]
         except Exception as exc:
             rounds.append({"round": round_number, "dimension": request.target_dimension, "queries": [request.query], "error": type(exc).__name__, "new_sources": 0})
             return {"status": "PARTIAL", "stop_reason": "PROVIDER_ERROR", "coverage": current, "rounds": rounds}
