@@ -13,6 +13,7 @@ from impurity_leads.opportunity_rescore import run_stale_opportunity_rescore
 from impurity_leads.agent_github import export_ready_agent_jobs
 from impurity_leads.execution.stages import run_post_crawl_stages
 from impurity_leads.molecule_discovery import run_molecule_discovery
+from impurity_leads.outcomes import pipeline_outcome_report
 from impurity_leads.seed_sources import discover_missing_domains
 from impurity_leads.zero_cost import ProviderUsage
 
@@ -53,6 +54,13 @@ if __name__ == "__main__":
         # Keeps role confidence and recency current as sources age.
         return run_contact_rescore() if contacts_ready() else {"status": "SKIPPED", "reason": "supabase_credentials_missing"}
 
+    def outcomes_stage():
+        # Conversion by priority from the shared pipeline: the check that scores work.
+        if not contacts_ready():
+            return {"status": "SKIPPED", "reason": "supabase_credentials_missing"}
+        from supabase import create_client
+        return pipeline_outcome_report(create_client(settings.supabase_url, settings.supabase_secret_key))
+
     def contact_stage():
         return run_pending_contact_research(settings, limit=10, provider_usage=provider_usage)
 
@@ -78,6 +86,7 @@ if __name__ == "__main__":
         ("targeted_research", targeted_stage),
         ("opportunity_evidence_queue", opportunity_stage),
         ("agent_work_export", agent_stage),
+        ("pipeline_outcomes", outcomes_stage),
     ])
     for stage in post_crawl.stages:
         print(json.dumps({"event": stage.name, "status": stage.status, "processed": stage.processed, "sources": stage.sources, "claims": stage.claims, "links": stage.links, "error": stage.error, "metrics": stage.metrics}, sort_keys=True))
