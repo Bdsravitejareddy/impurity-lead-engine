@@ -13,9 +13,11 @@ def test_explain_score_reports_freshness_and_diversity():
     result=explain_score([_s('regulatory_application',22,'fda',datetime(2024,12,13,tzinfo=timezone.utc)),
                           _s('degradation_product',35,'regulatory',datetime(2024,5,1,tzinfo=timezone.utc)),
                           _s('stability',18,'regulatory',datetime(2024,5,1,tzinfo=timezone.utc))], now=now)
-    assert result['raw_total'] == 75
+    # The 632-day-old filing keeps 75% of its weight; impurity evidence is not decayed.
+    assert result['raw_total'] == 69.5
     assert result['diversity_bonus'] == 4
     assert result['urgency_bonus'] == 3
-    assert result['clamped_total'] == 82
-    assert result['priority'] == 'HOT'
-    assert [x['effective_contribution'] for x in result['signals']] == [22,35,18]
+    assert result['clamped_total'] == 77
+    assert result['priority'] == 'HIGH'
+    assert [x['effective_contribution'] for x in result['signals']] == [16.5,35,18]
+    assert result['signals'][0]['freshness_adjustment'] == -5.5

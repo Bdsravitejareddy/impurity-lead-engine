@@ -100,3 +100,12 @@ def test_aggregation_groups_display_variants_of_one_pair():
     candidates = aggregate_candidates([first, second])
     assert len(candidates) == 1
     assert candidates[0]["score"] == min(100, 38 + 60 + 15)
+
+
+def test_old_context_records_decay_but_impurity_evidence_does_not():
+    now = datetime.now(timezone.utc)
+    recent = _typed("regulatory_application", 22, days_old=100)
+    old = _typed("regulatory_application", 22, days_old=3000)
+    assert score_signals([recent], now=now) == 22 + 15
+    assert score_signals([old], now=now) == round(22 * 0.25)
+    assert score_signals([_typed("degradation_product", 35, days_old=3000)], now=now) == 35

@@ -1,6 +1,7 @@
 """Explain score_signals contributions without changing scoring semantics."""
 from datetime import datetime, timezone
-from .score import freshness_penalty, score_signals, urgency_bonus
+from .aggregate import _priority
+from .score import CONTEXT_SIGNAL_TYPES, context_age_factor, score_signals, urgency_bonus
 
 
 def explain_score(signals, *, now: datetime | None = None, is_vendor: bool = False) -> dict:
@@ -8,8 +9,10 @@ def explain_score(signals, *, now: datetime | None = None, is_vendor: bool = Fal
     rows=[]
     for signal in signals:
         age = (now - signal.event_date).days if signal.event_date else None
-        freshness = freshness_penalty(signal.event_date, now)
-        effective = signal.base_weight + freshness
+        # Phase and filing records decay with age; impurity evidence does not.
+        factor = context_age_factor(signal.event_date, now) if signal.signal_type in CONTEXT_SIGNAL_TYPES else 1.0
+        effective = signal.base_weight * factor
+        freshness = effective - signal.base_weight
         rows.append({
             "signal_type": signal.signal_type,
             "source_type": signal.source_type,
@@ -29,5 +32,5 @@ def explain_score(signals, *, now: datetime | None = None, is_vendor: bool = Fal
     unclamped = raw + diversity + urgency
     clamped = score_signals(signals, is_vendor=is_vendor, now=now)
     types = {signal.signal_type for signal in signals}
-    priority = "HOT" if clamped >= 80 or "direct_impurity_rfq" in types else "HIGH" if clamped >= 65 else "REVIEW" if clamped >= 50 else None
+    priority = _priority(clamped, types)
     return {"signals": rows, "raw_total": raw, "diversity_bonus": diversity, "newest_event": latest_event.isoformat() if latest_event else None, "urgency_bonus": urgency, "unclamped_total": unclamped, "clamped_total": clamped, "final_priority": priority, "priority": priority}

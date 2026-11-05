@@ -19,7 +19,7 @@ from impurity_leads.export import export_csv, export_xlsx
 from impurity_leads.models import SourceRecord, Signal, Opportunity
 from impurity_leads.normalize import normalize_company_name
 from impurity_leads.pipeline import process_records_with_candidates
-from impurity_leads.seeds import load_company_seeds
+from impurity_leads.seed_sources import load_run_seeds
 from impurity_leads.storage.memory import MemoryLeadStore
 from impurity_leads.storage.supabase_store import SupabaseLeadStore
 from impurity_leads.storage.task_store import create_task_store
@@ -195,7 +195,9 @@ def run_daily(settings,root,*,workers=6,fresh=False):
     store=None
     try:
         store=create_task_store(settings)
-        seeds=load_company_seeds(Path(root)/'seeds/companies.csv') if (Path(root)/'seeds/companies.csv').exists() else []
+        # The optional CSV override plus every qualified company with a website;
+        # the CSV alone left production with zero seeds.
+        seeds=load_run_seeds(settings,root)
         safe=settings.model_dump(exclude={'supabase_url','supabase_secret_key','workers'})
         material={'settings':safe,'seeds':[asdict(s) for s in seeds],'sources':['clinical_trials','fda','company_site','common_crawl'],
                   'schema_version':VERSION,'behavior_version':behavior_version()}

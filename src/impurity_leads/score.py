@@ -33,7 +33,26 @@ CONTEXT_SIGNAL_TYPES = frozenset({"phase_ii", "phase_iii", "regulatory_applicati
 CONTEXT_CAP = 35
 
 
-def _diminishing(weights: list[int]) -> float:
+def context_age_factor(event_date: datetime | None, now: datetime | None = None) -> float:
+    """How much a phase or filing record still says about current activity.
+
+    A 2015 filing is not the same signal as a 2026 one. Impurity evidence is
+    not decayed: an impurity a company characterized stays relevant.
+    """
+    if event_date is None:
+        # Unknown age is not evidence of old age; FDA and trial records are dated.
+        return 1.0
+    days = max(0, ((now or datetime.now(timezone.utc)) - event_date).days)
+    if days <= 365:
+        return 1.0
+    if days <= 730:
+        return 0.75
+    if days <= 1460:
+        return 0.5
+    return 0.25
+
+
+def _diminishing(weights: list[float]) -> float:
     """Strongest record counts in full, each further one of the type half as much."""
     return sum(weight / (2 ** index) for index, weight in enumerate(sorted(weights, reverse=True)))
 
@@ -44,9 +63,10 @@ def score_signals(signals: list[Signal], is_vendor: bool = False, now: datetime 
     # Summing every record let volume alone reach 100: five bare FDA filings
     # scored HOT. Repeats of a type now add diminishing weight and context
     # types share one cap.
-    by_type: dict[str, list[int]] = {}
+    by_type: dict[str, list[float]] = {}
     for s in signals:
-        by_type.setdefault(s.signal_type, []).append(s.base_weight)
+        weight = s.base_weight * context_age_factor(s.event_date, now) if s.signal_type in CONTEXT_SIGNAL_TYPES else s.base_weight
+        by_type.setdefault(s.signal_type, []).append(weight)
     context = sum(_diminishing(weights) for kind, weights in by_type.items() if kind in CONTEXT_SIGNAL_TYPES)
     evidence = sum(_diminishing(weights) for kind, weights in by_type.items() if kind not in CONTEXT_SIGNAL_TYPES)
     raw = round(evidence + min(context, CONTEXT_CAP))

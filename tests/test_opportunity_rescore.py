@@ -56,10 +56,11 @@ def signal(kind, weight, company="c1", molecule="m1", n=0, source="trial", days_
 
 
 def test_old_rule_hot_from_filings_alone_is_demoted_below_the_dashboard_threshold():
-    # Five filings summed to a HOT score under the old rules.
+    # Five filings summed to a HOT score under the old rules. Now each 400-day-old
+    # filing keeps 75% (16.5), repeats count half as much each time: round(16.5 * 1.9375) = 32.
     client = Client([opportunity("o1")], [signal("regulatory_application", 22, n=n) for n in range(5)])
     result = rescore_stale_opportunities(client, qualified_before=RUN_START, now=NOW)
-    assert client.updates == [("opportunities", "o1", {"score": 35 + 3, "priority": "REVIEW", "rationale": "regulatory application",
+    assert client.updates == [("opportunities", "o1", {"score": 32 + 3, "priority": "REVIEW", "rationale": "regulatory application",
                                                       "likely_need_type": ["regulatory_application"], "decision_maker_role": []})]
     assert client.data["opportunities"][0]["score"] < 50
     assert result["lapsed"] == 1 and result["rescored"] == 1
@@ -96,7 +97,7 @@ def test_vendor_company_lapses_and_pairs_without_signals_are_reported_not_guesse
 def test_dry_run_reports_without_writing():
     client = Client([opportunity("o1")], [signal("regulatory_application", 22)])
     result = rescore_stale_opportunities(client, qualified_before=None, now=NOW, apply=False)
-    assert client.updates == [] and result["rescored"] == 1 and result["changes"][0]["after_score"] == 25
+    assert client.updates == [] and result["rescored"] == 1 and result["changes"][0]["after_score"] == 19
 
 
 def test_rescore_stage_skips_without_credentials_and_cli_defaults_to_dry_run(monkeypatch, capsys):
@@ -122,7 +123,8 @@ def test_signals_on_a_soft_merged_twin_count_for_the_surviving_company():
     result = rescore_stale_opportunities(client, qualified_before=RUN_START, now=NOW)
     assert result["without_signals"] == 0
     assert result["evaluated"] == 1
-    assert client.data["opportunities"][0]["score"] == 38 + 18 + 3  # plus the 400-day urgency bonus
+    # Impurity evidence 38, the 400-day-old phase III record at 75% (13.5), plus the urgency bonus.
+    assert client.data["opportunities"][0]["score"] == round(38 + 18 * 0.75) + 3
 
 
 def test_rescore_runs_before_the_soft_merge_column_exists():
