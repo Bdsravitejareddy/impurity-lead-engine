@@ -80,12 +80,7 @@ def test_backfilled_crawl_dates_do_not_count_as_role_evidence():
 
 
 def test_rescore_reports_assumed_roles_and_skips_merged_contacts():
-    import importlib.util
-    from pathlib import Path
-
-    spec = importlib.util.spec_from_file_location("rescore_contacts", Path("scripts/rescore_contacts.py"))
-    rescore = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(rescore)
+    import impurity_leads.contact_rescore as rescore
 
     contacts = [
         {"id": "a", "display_name": "A", "title": "Head of Quality", "quality_diagnostics": {"score": 61, "dimensions": {"current_role": 82.0}}},

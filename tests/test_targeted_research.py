@@ -46,3 +46,34 @@ def test_qualified_contact_stops_immediately():
     result = run_targeted_rounds(opportunity, [contact], Provider([]), accept_result=lambda *_: None)
     assert result["stop_reason"] == "QUALIFIED"
     assert result["rounds"] == []
+
+
+def test_provider_blip_is_retried_once_and_permanent_errors_are_not():
+    import httpx
+    import pytest
+
+    from impurity_leads.research_discovery import SearchRequest
+    from impurity_leads.targeted_research import discover_with_retry
+
+    request = SearchRequest(query="ritonavir impurity", seed_type="MOLECULE")
+
+    class Flaky:
+        calls = 0
+
+        def discover(self, request):
+            Flaky.calls += 1
+            if Flaky.calls == 1:
+                raise httpx.ReadTimeout("slow")
+            return ["ok"]
+
+    sleeps = []
+    assert discover_with_retry(Flaky(), request, sleep=sleeps.append) == ["ok"]
+    assert sleeps == [5.0]
+
+    class Broken:
+        def discover(self, request):
+            raise ValueError("bad payload")
+
+    with pytest.raises(ValueError):
+        discover_with_retry(Broken(), request, sleep=sleeps.append)
+    assert sleeps == [5.0]
