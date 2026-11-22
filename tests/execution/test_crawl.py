@@ -104,3 +104,22 @@ def test_sitemap_index_is_expanded_one_level_with_gzip_children_newest_first():
     assert ctx.checkpoint['urls'][:2]==['https://example.com/jobs/new','https://example.com/jobs/old']
     assert 'https://other.example/jobs.xml' not in fetched
     assert 'https://example.com/nested.xml' not in fetched
+
+
+def test_a_page_that_keeps_returning_504_is_skipped_and_the_company_still_completes():
+    calls=[]
+    def handler(req):
+        calls.append(req.url.path)
+        if req.url.path=='/robots.txt':return httpx.Response(404)
+        if req.url.path=='/sitemap.xml':return httpx.Response(200,text='<urlset><url><loc>https://example.com/jobs/1</loc></url><url><loc>https://example.com/jobs/2</loc></url></urlset>')
+        if req.url.path=='/jobs/1':return httpx.Response(504)
+        if '/jobs/' in req.url.path:return httpx.Response(200,text=Path('tests/fixtures/company_job.html').read_text())
+        return httpx.Response(404)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        handlers=CrawlHandlers(Settings(),client_factory=lambda ctx:client)
+        ctx=Ctx()
+        with pytest.raises(TaskFailure):handlers.company(ctx)   # first 504: retried
+        records=handlers.company(ctx)['records']                # second 504: skipped
+    assert records
+    assert calls.count('/jobs/1')==2
+    assert ctx.checkpoint['page_failures']
