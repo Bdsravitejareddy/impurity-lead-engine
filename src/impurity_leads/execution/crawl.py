@@ -26,6 +26,9 @@ from impurity_leads.zero_cost import ProviderUsage
 MAX_CHILD_SITEMAPS = 5
 
 
+PAGE_ATTEMPTS = 2
+
+
 class CrawlHandlers:
     def __init__(self, settings, *, client_factory=None, reporter=None, opportunities=None, provider_usage: ProviderUsage | None = None):
         self.opportunities=opportunities or []
@@ -128,10 +131,27 @@ class CrawlHandlers:
                 url=cp['urls'][index]
                 html=None;modified=None
                 if policy.can_fetch(url):
-                    response=client.get(url,headers={'User-Agent':self.settings.user_agent})
-                    if response.status_code not in {401,403,404,410}:
-                        response.raise_for_status();html=response.text;modified=response.headers.get('Last-Modified')
+                    response=self._fetch_page(ctx,url,client)
+                    if response is not None and response.status_code not in {401,403,404,410}:
+                        html=response.text;modified=response.headers.get('Last-Modified')
                 yield cp,index,url,html,modified
+    def _fetch_page(self,ctx,url,client):
+        """Fetch one company page. A transient failure is retried once; a page that
+        keeps failing is skipped so one bad URL cannot block the whole company.
+        Returns None for a skipped page. Failure counts live in the latest
+        checkpoint, which the caller saves after every page."""
+        try:
+            response=client.get(url,headers={'User-Agent':self.settings.user_agent})
+            if response.status_code==429 or response.status_code>=500:
+                raise TaskFailure(f'http_{response.status_code}',retryable=True)
+            return response
+        except (TaskFailure,httpx.HTTPError):
+            failures=dict(ctx.checkpoint.get('page_failures',{}))
+            failures[url]=failures.get(url,0)+1
+            ctx.save_progress({**ctx.checkpoint,'page_failures':failures},ctx.result)
+            if failures[url]<PAGE_ATTEMPTS:
+                raise
+            return None
     def company(self,ctx):
         records=list(ctx.result.get('records',[]))
         seed_indexes=list(ctx.result.get('record_seed_indexes',[]))
