@@ -1,0 +1,17 @@
+name: diagnose site reachability
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Probe company sites from the runner
+        run: |
+          for d in takeda.com sandoz.com cipla.com novartis.com lilly.com roche.com lupin.com zydus.co.in; do
+            r=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -A 'SVAK-Impurity-Lead-Research/0.1' https://$d/robots.txt)
+            h=$(curl -s -L -m 25 -o /dev/null -w '%{http_code}' -A 'SVAK-Impurity-Lead-Research/0.1' https://$d/)
+            echo "$d robots=$r home=$h"
+          done
