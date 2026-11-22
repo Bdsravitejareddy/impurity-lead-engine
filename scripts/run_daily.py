@@ -13,6 +13,7 @@ from impurity_leads.opportunity_rescore import run_stale_opportunity_rescore
 from impurity_leads.agent_github import export_ready_agent_jobs
 from impurity_leads.execution.stages import run_post_crawl_stages
 from impurity_leads.molecule_discovery import run_molecule_discovery
+from impurity_leads.hunter import run_hunter_people
 from impurity_leads.outcomes import pipeline_outcome_report
 from impurity_leads.seed_sources import discover_missing_domains
 from impurity_leads.zero_cost import ProviderUsage
@@ -61,6 +62,14 @@ if __name__ == "__main__":
         from supabase import create_client
         return pipeline_outcome_report(create_client(settings.supabase_url, settings.supabase_secret_key))
 
+    def hunter_stage():
+        # Off unless HUNTER_API_KEY is set; see impurity_leads.hunter.
+        if not (contacts_ready() and os.environ.get("HUNTER_API_KEY")):
+            return {"status": "SKIPPED", "reason": "hunter_api_key_not_set"}
+        from supabase import create_client
+        client = create_client(settings.supabase_url, settings.supabase_secret_key)
+        return run_hunter_people(settings, client)
+
     def contact_stage():
         return run_pending_contact_research(settings, limit=10, provider_usage=provider_usage)
 
@@ -83,6 +92,7 @@ if __name__ == "__main__":
         ("contact_research", contact_stage),
         ("contact_repair", contact_repair_stage),
         ("contact_rescore", contact_rescore_stage),
+        ("hunter_people", hunter_stage),
         ("targeted_research", targeted_stage),
         ("opportunity_evidence_queue", opportunity_stage),
         ("agent_work_export", agent_stage),
