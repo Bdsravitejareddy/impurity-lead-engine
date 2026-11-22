@@ -140,6 +140,8 @@ def execute_run(store,settings,seeds,output_dir,*,workers=6,reporter=None,client
         existing_pairs_enriched=0, new_opportunities_persisted=qualified_count,
         newly_qualified=qualified_count, promoted=0, dismissed=0, unresolved=0)
     from impurity_leads.cli import select_contact_enrichment_targets
+    from impurity_leads.contact_targets import load_contact_targets, merge_contact_targets
+    opportunities=merge_contact_targets(opportunities,load_contact_targets(settings))
     seed_map={normalize_company_name(s.company_name):s for s in seeds}
     selected=defaultdict(list)
     for opportunity in select_contact_enrichment_targets(opportunities):
