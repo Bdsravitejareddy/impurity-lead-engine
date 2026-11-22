@@ -22,8 +22,13 @@ jobs:
           from impurity_leads.zero_cost import ProviderUsage
           from impurity_leads.crawling.robots import RobotsPolicy
           from impurity_leads.execution.retry import TaskFailure
+          import threading
+          class Runner:
+              stop = threading.Event()
           class Ctx:
+              runner = Runner()
               def check(self): pass
+              def before_request(self): pass
           settings = load_settings()
           print("user_agent:", settings.user_agent, "timeout:", settings.request_timeout_seconds, "delay:", settings.per_domain_delay_seconds)
           gate = HostGate(settings.per_domain_delay_seconds)
