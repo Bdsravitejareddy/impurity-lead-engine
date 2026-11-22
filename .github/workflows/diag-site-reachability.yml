@@ -33,6 +33,27 @@ jobs:
           print("user_agent:", settings.user_agent, "timeout:", settings.request_timeout_seconds, "delay:", settings.per_domain_delay_seconds)
           gate = HostGate(settings.per_domain_delay_seconds)
           domains = ["takeda.com","sandoz.com","cipla.com","novartis.com","lilly.com","roche.com","lupin.com","zydus.co.in","gilead.com","bayer.com"]
+          import concurrent.futures as cf
+          paths = ["/robots.txt", "/", "/sitemap.xml", "/careers", "/about", "/products", "/pipeline", "/media"]
+          def probe(d):
+              out = []
+              with CrawlClient(Ctx(), settings, HostGate(settings.per_domain_delay_seconds), usage=ProviderUsage()) as client:
+                  for path in paths:
+                      t = time.time()
+                      try:
+                          r = client.get(f"https://{d}{path}", headers={"User-Agent": settings.user_agent})
+                          out.append(f"{path}:{r.status_code}/{time.time()-t:.1f}s")
+                      except Exception as e:
+                          out.append(f"{path}:ERR {type(e).__name__} {time.time()-t:.1f}s")
+              return f"{d}: " + " ".join(out)
+          print("=== parallel run, 6 workers, same host gate per run ===")
+          domains6 = ["takeda.com","sandoz.com","cipla.com","novartis.com","roche.com","gilead.com"]
+          with cf.ThreadPoolExecutor(max_workers=6) as pool:
+              for line in pool.map(probe, domains6):
+                  print(line, flush=True)
+          print("=== serial run, same paths ===")
+          for line in map(probe, domains6[:2]):
+              print(line, flush=True)
           with CrawlClient(Ctx(), settings, gate, usage=ProviderUsage()) as client:
               for d in domains:
                   t = time.time()
