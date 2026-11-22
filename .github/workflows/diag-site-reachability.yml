@@ -6,12 +6,40 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Probe company sites from the runner
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install .
+      - name: Run the crawler's own HTTP client against company sites
         run: |
-          for d in takeda.com sandoz.com cipla.com novartis.com lilly.com roche.com lupin.com zydus.co.in; do
-            r=$(curl -s -m 20 -o /dev/null -w '%{http_code}' -A 'SVAK-Impurity-Lead-Research/0.1' https://$d/robots.txt)
-            h=$(curl -s -L -m 25 -o /dev/null -w '%{http_code}' -A 'SVAK-Impurity-Lead-Research/0.1' https://$d/)
-            echo "$d robots=$r home=$h"
-          done
+          python - <<'PY'
+          import time
+          from impurity_leads.config import load_settings
+          from impurity_leads.execution.http import CrawlClient, HostGate
+          from impurity_leads.zero_cost import ProviderUsage
+          from impurity_leads.crawling.robots import RobotsPolicy
+          from impurity_leads.execution.retry import TaskFailure
+          class Ctx:
+              def check(self): pass
+          settings = load_settings()
+          print("user_agent:", settings.user_agent, "timeout:", settings.request_timeout_seconds, "delay:", settings.per_domain_delay_seconds)
+          gate = HostGate(settings.per_domain_delay_seconds)
+          domains = ["takeda.com","sandoz.com","cipla.com","novartis.com","lilly.com","roche.com","lupin.com","zydus.co.in","gilead.com","bayer.com"]
+          with CrawlClient(Ctx(), settings, gate, usage=ProviderUsage()) as client:
+              for d in domains:
+                  t = time.time()
+                  try:
+                      r = client.get(f"https://{d}/robots.txt", headers={"User-Agent": settings.user_agent})
+                      robots = f"{r.status_code} final={r.url}"
+                  except Exception as e:
+                      robots = f"ERR {type(e).__name__}: {str(e)[:80]} {getattr(e,'args',[''])[0] if e.args else ''}"
+                  try:
+                      h = client.get(f"https://{d}/", headers={"User-Agent": settings.user_agent})
+                      home = f"{h.status_code} final={h.url} bytes={len(h.content)}"
+                  except Exception as e:
+                      home = f"ERR {type(e).__name__}: {str(e)[:80]}"
+                  print(f"{d:14s} robots={robots} | home={home} | {time.time()-t:.1f}s", flush=True)
+          PY
