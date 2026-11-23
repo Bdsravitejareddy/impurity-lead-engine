@@ -39,7 +39,7 @@ def rank_candidates(rows: list[dict[str, Any]], signals_by_fingerprint: dict[str
         score = float(row.get("candidate_score") or 0)
         fps = row.get("candidate_signal_fingerprints") or []
         signals = [signals_by_fingerprint.get(str(fp), {}) for fp in fps]
-        technical = sum(1 for signal in signals if str(signal.get("signal_type") or "") in {"impurity_characterization", "degradation_product", "reference_standard", "genotoxic_impurity", "nitrosamine_ndsri", "direct_impurity_rfq"})
+        technical = sum(1 for signal in signals if str(signal.get("signal_type") or "") in {"impurity_characterization", "degradation_product", "reference_standard", "genotoxic_impurity", "nitrosamine_ndsri", "direct_impurity_rfq", "impurity_recall"})
         classes = len({str(signal.get("source_type") or "").lower() for signal in signals if signal.get("source_type")})
         return (score, technical, classes, len(signals), str(row.get("candidate_last_signal_at") or ""))
     return sorted(rows, key=key, reverse=True)

@@ -20,7 +20,7 @@ import { groupEvidenceBySource, formatQuality, formatRoleConfidence } from './da
 import { describeFailure, getCandidateFailures, getPipelineFailures } from './data/failureDiagnostics';
 
 type Contact={id?:string;name:string;title?:string;function?:string;email?:string|null;email_status?:string;current_status?:string;mailbox_verified?:boolean;phone?:string|null;profile_url?:string;role_fit_score?:number;confidence?:number;current_role_confidence?:number|null;evidence_urls?:string[];evidence?:any[];why?:string;recommended_channel?:string;professional_themes?:string[];career?:string[];technical_evidence?:string[];jtbd?:string[];intelligence?:any;intelligence_availability?:Record<string,boolean>;related_molecules?:any[];molecule_history?:any[]};
-type Lead={id?:string;account:any;opportunity:any;evidence:any[];contacts:Contact[];other_company_contacts?:Contact[];person_intelligence:any;outreach:any};
+type Lead={id?:string;account:any;opportunity:any;evidence:any[];contacts:Contact[];other_company_contacts?:Contact[];person_intelligence:any;outreach:any;why_svak?:any};
 type Candidate={company:string;molecule:string;final_score:number;priority?:string|null;technical_evidence_found:boolean;requests:number;elapsed_seconds:number;dominant_failure:string;accepted_signal_types?:string[];source_status?:any};
 function resolveCanonicalContact(data:any, slug:string, leads:Lead[]){
   const canonical=data?.canonicalContacts?.find((contact:any)=>contact.id===slug)

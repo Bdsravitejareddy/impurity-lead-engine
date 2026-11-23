@@ -37,3 +37,23 @@ def fda_params(page: int = 0, today: date | None = None) -> dict:
         "limit": FDA_PAGE_SIZE,
         "skip": page * FDA_PAGE_SIZE,
     }
+
+
+RECALLS_URL = "https://api.fda.gov/drug/enforcement.json"
+RECALL_PAGE_SIZE = 100
+RECALL_MAX_PAGES = 5
+# Three years: an impurity recall leaves follow-up work (root cause, new
+# controls, re-validation) long after the recall itself.
+RECALL_LOOKBACK_DAYS = 1095
+RECALL_REASON_QUERY = 'reason_for_recall:(impurit* OR nitrosamin* OR "N-nitroso" OR NDSRI OR degradat*)'
+
+
+def recall_params(page: int = 0, today: date | None = None) -> dict:
+    today = today or date.today()
+    start = today - timedelta(days=RECALL_LOOKBACK_DAYS)
+    return {
+        "search": f"{RECALL_REASON_QUERY} AND recall_initiation_date:[{start:%Y%m%d} TO {today:%Y%m%d}]",
+        "sort": "recall_initiation_date:desc",
+        "limit": RECALL_PAGE_SIZE,
+        "skip": page * RECALL_PAGE_SIZE,
+    }

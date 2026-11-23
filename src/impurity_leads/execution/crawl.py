@@ -6,7 +6,8 @@ from urllib.parse import urlparse
 import httpx
 from impurity_leads.adapters.clinical_trials import ClinicalTrialsAdapter
 from impurity_leads.adapters.fda import FDAAdapter
-from impurity_leads.adapters.queries import CLINICAL_TRIALS_URL, FDA_PAGE_SIZE, FDA_URL, MAX_PAGES, clinical_trials_params, fda_params
+from impurity_leads.adapters.fda_recalls import FDARecallAdapter
+from impurity_leads.adapters.queries import CLINICAL_TRIALS_URL, FDA_PAGE_SIZE, FDA_URL, MAX_PAGES, RECALL_MAX_PAGES, RECALL_PAGE_SIZE, RECALLS_URL, clinical_trials_params, fda_params, recall_params
 from impurity_leads.adapters.company_site import CompanySiteAdapter
 from impurity_leads.adapters.common_crawl import CommonCrawlAdapter, IndexNameCache
 from impurity_leads.contacts.discovery import contact_candidate_urls
@@ -54,6 +55,14 @@ class CrawlHandlers:
                     for study in payload.get('studies',[]): records.extend(adapter.parse(study))
                     token=payload.get('nextPageToken')
                     if not token: break
+            elif source=='fda_recalls':
+                adapter=FDARecallAdapter()
+                for page in range(RECALL_MAX_PAGES):
+                    payload=self._structured_page(client,RECALLS_URL,recall_params(page))
+                    for result in payload.get('results',[]): records.extend(adapter.parse(result))
+                    total=((payload.get('meta') or {}).get('results') or {}).get('total',0)
+                    # openFDA answers 404 for a page past the end, so stop on the total.
+                    if (page+1)*RECALL_PAGE_SIZE>=total: break
             else:
                 adapter=FDAAdapter()
                 for page in range(MAX_PAGES):

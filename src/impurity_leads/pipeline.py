@@ -6,6 +6,9 @@ from impurity_leads.normalize import normalize_company_name, normalize_molecule_
 from impurity_leads.storage.base import LeadStore
 
 _PHASE_WEIGHTS = {"PHASE3": 18, "PHASE2": 12}
+# A recall for an impurity failure is dated proof the firm must fix that impurity:
+# a recent one reaches HIGH alone, and HOT with a nitrosamine finding.
+IMPURITY_RECALL_WEIGHT = 55
 
 
 def _record_signals(record: SourceRecord) -> list[Signal]:
@@ -92,6 +95,27 @@ def _record_signals(record: SourceRecord) -> list[Signal]:
                 confidence=1.0,
                 fingerprint=signal_fingerprint(company_key, molecule_key, signal_type, record.source_url, record.signal_text[:800]),
                 metadata_json={"need_type": "late-stage development", **record.metadata_json},
+            )
+        )
+
+    recall = record.metadata_json.get("recall_number")
+    if molecule_display and recall:
+        signal_type = "impurity_recall"
+        output.append(
+            Signal(
+                company_name=company_display,
+                molecule_name=molecule_display,
+                source_type=record.source_type,
+                signal_type=signal_type,
+                source_url=record.source_url,
+                source_record_id=record.source_record_id,
+                evidence_text=record.signal_text[:800],
+                event_date=record.published_at,
+                discovered_at=discovered_at,
+                base_weight=IMPURITY_RECALL_WEIGHT,
+                confidence=1.0,
+                fingerprint=signal_fingerprint(company_key, molecule_key, signal_type, record.source_url, record.signal_text[:800]),
+                metadata_json={"need_type": "impurity investigation and control", **record.metadata_json},
             )
         )
 
