@@ -39,6 +39,9 @@ class CrawlHandlers:
         self.reporter=reporter
         self.provider_usage=provider_usage
         self.common_crawl_index=IndexNameCache()
+        # Common Crawl is optional discovery. Once its index fails in a run, skip it
+        # for every later company instead of failing each one on the same outage.
+        self.common_crawl_down=False
     def client(self,ctx):
         return nullcontext(self.client_factory(ctx)) if self.client_factory else CrawlClient(ctx,self.settings,self.gate,usage=self.provider_usage)
     def structured(self,ctx):
@@ -88,17 +91,18 @@ class CrawlHandlers:
         policy=RobotsPolicy.from_text(text,base,self.settings.user_agent)
         self.gate.set_delay(base,policy.crawl_delay())
         return policy
-    def _sitemap(self,client,url,policy,required=False):
+    def _sitemap(self,client,url,policy):
         if not policy.can_fetch(url):return None
         response=client.get(url,headers={'User-Agent':self.settings.user_agent})
         if response.status_code!=200:
-            if required and response.status_code not in {401,403,404,410}:response.raise_for_status()
+            # A missing or failing sitemap only narrows discovery; the company's
+            # standard pages and Common Crawl still supply URLs.
             return None
         try:return parse_sitemap(response.content)
         except Exception:return None
     def _sitemap_urls(self,client,domain,policy):
         """Root sitemap, or the newest children of a sitemap index (one level), newest pages first."""
-        root=self._sitemap(client,f'https://{domain}/sitemap.xml',policy,required=True)
+        root=self._sitemap(client,f'https://{domain}/sitemap.xml',policy)
         if root is None:return []
         if not root.is_index:return root.locations()
         wanted=domain.lower().removeprefix('www.')
@@ -112,6 +116,8 @@ class CrawlHandlers:
         sitemap=self._sitemap_urls(client,domain,policy)
         common=[]
         try:
+            if self.common_crawl_down:
+                raise TaskFailure('common_crawl_unavailable',skipped=True)
             adapter=CommonCrawlAdapter(client=client,user_agent=self.settings.user_agent,
                 max_urls_per_domain=12 if contact else 10,sleep_fn=lambda _:None,
                 index_cache=self.common_crawl_index)
@@ -120,10 +126,9 @@ class CrawlHandlers:
             else:common=adapter.discover(domain)
         except (DatabaseUnavailable,InterruptedTask):raise
         except Exception as error:
-            failure = classify_error(error)
+            failure = error if isinstance(error,TaskFailure) else classify_error(error)
             if failure.retryable:
-                failure.domain = 'index.commoncrawl.org'
-                raise failure from None
+                self.common_crawl_down=True
             if self.reporter:self.reporter.emit({'event':'source_skipped','source':'common_crawl','domain':domain,'status':'skipped','error':failure.code})
         return contact_candidate_urls([*sitemap,*common],domain,limit=12) if contact else relevant_candidate_urls(domain,sitemap,common,cap=15)
     def _pages(self,ctx,contact=False):
