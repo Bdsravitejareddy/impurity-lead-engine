@@ -30,17 +30,31 @@ def test_reconstruction_preserves_structured_then_original_seed_order():
     assert process_records(actual,MemoryLeadStore()) == process_records(expected,MemoryLeadStore())
 
 
-def test_common_crawl_retry_after_reaches_task_scheduler():
+def test_common_crawl_outage_is_skipped_for_the_rest_of_the_run():
     handlers=CrawlHandlers(Settings())
+    calls=[]
     def respond(request):
-        if request.url.path=='/sitemap.xml': return httpx.Response(404)
-        return httpx.Response(429,headers={'Retry-After':'137'})
+        calls.append(request.url.host)
+        if request.url.path=='/sitemap.xml':
+            return httpx.Response(200,text='<urlset><url><loc>https://example.com/pipeline</loc></url></urlset>')
+        return httpx.Response(504)
+    policy=SimpleNamespace(can_fetch=lambda _:True)
     with httpx.Client(transport=httpx.MockTransport(respond)) as client:
-        with pytest.raises(TaskFailure) as error:
-            handlers._discovery(client,'example.com',SimpleNamespace(can_fetch=lambda _:True))
-    assert error.value.retryable
-    assert error.value.retry_after == 137
-    assert error.value.domain == 'index.commoncrawl.org'
+        first=handlers._discovery(client,'example.com',policy)
+        after_outage=calls.count('index.commoncrawl.org')
+        handlers._discovery(client,"example.org",policy)
+    assert 'https://example.com/pipeline' in first
+    assert handlers.common_crawl_down
+    assert after_outage >= 1
+    assert calls.count('index.commoncrawl.org') == after_outage
+
+
+def test_failing_sitemap_does_not_fail_the_company():
+    handlers=CrawlHandlers(Settings())
+    handlers.common_crawl_down=True
+    with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(504))) as client:
+        urls=handlers._discovery(client,'example.com',SimpleNamespace(can_fetch=lambda _:True))
+    assert isinstance(urls,list)
 
 
 def test_export_run_reads_completed_outputs_without_claiming_or_crawling(monkeypatch,tmp_path):
