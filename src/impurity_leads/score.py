@@ -26,7 +26,7 @@ def urgency_bonus(event_date: datetime | None, now: datetime | None = None) -> i
 # these a pair can be REVIEW at most, however many context records it has.
 IMPURITY_SIGNAL_TYPES = frozenset({
     "direct_impurity_rfq", "reference_standard", "nitrosamine_ndsri", "genotoxic_impurity",
-    "impurity_characterization", "degradation_product", "stability",
+    "impurity_characterization", "degradation_product", "stability", "impurity_recall",
 })
 # Development-stage and filing records show activity, not impurity demand.
 CONTEXT_SIGNAL_TYPES = frozenset({"phase_ii", "phase_iii", "regulatory_application"})

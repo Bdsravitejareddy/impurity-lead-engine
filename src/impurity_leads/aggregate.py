@@ -12,6 +12,7 @@ _ROLE_MAP = {
     "genotoxic_impurity": ["Analytical Development", "Regulatory CMC"],
     "reference_standard": ["Analytical R&D", "Strategic Sourcing/Procurement"],
     "direct_impurity_rfq": ["Analytical R&D", "Strategic Sourcing/Procurement"],
+    "impurity_recall": ["Head of Quality", "Analytical R&D", "Regulatory CMC"],
 }
 
 
