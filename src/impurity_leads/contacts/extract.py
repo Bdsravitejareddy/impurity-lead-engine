@@ -233,7 +233,39 @@ def extract_contacts_from_html(
         if candidate:
             candidates.append(candidate)
 
+    candidates.extend(_press_release_people(url, soup, company_name, observed_at))
     return _merge_candidates(candidates)
+
+
+def _press_release_people(url: str, soup: BeautifulSoup, company_name: str, observed_at: datetime) -> list[ContactCandidate]:
+    """Executives quoted in a dated company release, and its named media contact."""
+    from impurity_leads.adapters.newsroom import announcement_people, is_news_url
+
+    if not is_news_url(url):
+        return []
+    body = soup.find("article") or soup.find("main") or soup.body or soup
+    text = body.get_text("\n", strip=True)
+    output = []
+    for person in announcement_people(text):
+        if not _plausible_name(person["name"]):
+            continue
+        sentence = next((line for line in text.split("\n") if person["name"] in line), person["name"])
+        candidate = _candidate_from_fields(
+            company_name=company_name,
+            name=person["name"],
+            title=person["title"],
+            profile_url=None,
+            email=person["email"],
+            phone=None,
+            source_type="company_press",
+            source_url=url,
+            observed_at=observed_at,
+            evidence_text=sentence,
+            exact_confidence=0.9,
+        )
+        if candidate:
+            output.append(candidate)
+    return output
 
 
 def extract_trial_contacts(

@@ -28,8 +28,8 @@ IMPURITY_SIGNAL_TYPES = frozenset({
     "direct_impurity_rfq", "reference_standard", "nitrosamine_ndsri", "genotoxic_impurity",
     "impurity_characterization", "degradation_product", "stability", "impurity_recall",
 })
-# Development-stage and filing records show activity, not impurity demand.
-CONTEXT_SIGNAL_TYPES = frozenset({"phase_ii", "phase_iii", "regulatory_application"})
+# Development-stage, filing and announcement records show activity, not impurity demand.
+CONTEXT_SIGNAL_TYPES = frozenset({"phase_ii", "phase_iii", "regulatory_application", "company_announcement"})
 CONTEXT_CAP = 35
 
 

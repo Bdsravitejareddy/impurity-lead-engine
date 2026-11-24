@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 from dateutil.parser import isoparse
 
 from impurity_leads.classify import RULES, looks_like_impurity_vendor
+from impurity_leads.adapters.newsroom import parse_announcement
 from impurity_leads.extract import extract_evidence_windows_at
 from impurity_leads.models import SourceRecord
 
@@ -111,4 +112,29 @@ class CompanySiteAdapter:
                     metadata_json=metadata,
                 )
             )
+        # A dated press release or news post also becomes an announcement record
+        # per molecule it names: first-party, dated context for "why now".
+        announcement = None if vendor else parse_announcement(url, html, published_at)
+        if announcement and announcement.event_types:
+            molecules = list(dict.fromkeys(name for _, name in mentions))
+            for molecule in molecules[:5]:
+                records.append(
+                    SourceRecord(
+                        source_name=self.name,
+                        source_type="news",
+                        source_url=url,
+                        fetched_at=datetime.now(timezone.utc),
+                        company_name_raw=company_name,
+                        company_domain_raw=urlparse(url).netloc.lower(),
+                        molecule_name_raw=molecule,
+                        signal_text=announcement.summary,
+                        published_at=announcement.published_at,
+                        metadata_json={
+                            **metadata,
+                            "announcement_type": announcement.event_types[0],
+                            "announcement_types": announcement.event_types,
+                            "announcement_title": announcement.title,
+                        },
+                    )
+                )
         return records

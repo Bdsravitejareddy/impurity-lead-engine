@@ -34,4 +34,15 @@ describe('pitch kit', () => {
     expect(empty.why_now).toBeNull()
     expect(empty.discovery_question).toContain('Darolutamide')
   })
+
+  it('quotes a recent company announcement as the hook', () => {
+    const kit = buildPitchKit('Example Pharma', 'Ciprofloxacin', [
+      { signal_type: 'regulatory_application', event_date: '2019-01-10', source_type: 'regulatory' },
+      { signal_type: 'company_announcement', event_date: '2026-10-15', source_type: 'news',
+        evidence_text: 'Example Pharma receives USFDA final approval for Ciprofloxacin Tablets. Mumbai, 15 October 2026.' },
+    ], now)
+    expect(kit.lead_signal).toBe('company_announcement')
+    expect(kit.personalization_hook).toBe('Example Pharma announced "Example Pharma receives USFDA final approval for Ciprofloxacin Tablets" (October 2026).')
+    expect(kit.why_now).toContain('39 days ago')
+  })
 })
