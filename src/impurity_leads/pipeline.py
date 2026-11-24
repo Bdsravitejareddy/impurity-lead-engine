@@ -9,6 +9,10 @@ _PHASE_WEIGHTS = {"PHASE3": 18, "PHASE2": 12}
 # A recall for an impurity failure is dated proof the firm must fix that impurity:
 # a recent one reaches HIGH alone, and HOT with a nitrosamine finding.
 IMPURITY_RECALL_WEIGHT = 55
+# A company's own dated announcement is context: it shows current activity on the
+# molecule, so it is capped with phase and filing records and decays with age.
+ANNOUNCEMENT_WEIGHTS = {"recall_or_warning": 25, "inspection": 20, "filing": 20, "approval": 18,
+                        "launch": 15, "facility": 15, "clinical": 12, "deal": 10, "other": 8}
 
 
 def _record_signals(record: SourceRecord) -> list[Signal]:
@@ -39,6 +43,32 @@ def _record_signals(record: SourceRecord) -> list[Signal]:
                 confidence=1.0,
                 fingerprint=signal_fingerprint(company_key, molecule_key, kind, record.source_url, record.signal_text[:800]),
                 metadata_json={"excluded_vendor": True},
+            )
+        )
+        return output
+
+    announcement = record.metadata_json.get("announcement_type")
+    if announcement:
+        # The page's impurity wording is already scored from its "site" records;
+        # the announcement adds only its own dated context signal.
+        if not molecule_display:
+            return output
+        signal_type = "company_announcement"
+        output.append(
+            Signal(
+                company_name=company_display,
+                molecule_name=molecule_display,
+                source_type=record.source_type,
+                signal_type=signal_type,
+                source_url=record.source_url,
+                source_record_id=record.source_record_id,
+                evidence_text=record.signal_text[:800],
+                event_date=record.published_at,
+                discovered_at=discovered_at,
+                base_weight=ANNOUNCEMENT_WEIGHTS.get(str(announcement), ANNOUNCEMENT_WEIGHTS["other"]),
+                confidence=1.0,
+                fingerprint=signal_fingerprint(company_key, molecule_key, signal_type, record.source_url, record.signal_text[:800]),
+                metadata_json={"need_type": "company announcement", **record.metadata_json},
             )
         )
         return output

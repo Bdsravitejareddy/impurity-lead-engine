@@ -77,6 +77,12 @@ const PLAYBOOKS: [string, Playbook][] = [
     value: 'Related-substances method development and validation, with the impurity standards the method needs.',
     question: 'Is there related-substances method work planned where outside capacity would help?',
   }],
+  ['company_announcement', {
+    label: 'a recent company announcement',
+    service: 'Impurity standards and analytical support for the work the announcement starts',
+    value: 'Impurity standards and methods ready for the filing, launch, site or process change the announcement describes.',
+    question: 'Does the work behind this announcement need impurity standards or analytical capacity you have not lined up yet?',
+  }],
   ['regulatory_application', {
     label: 'an FDA application',
     service: 'Impurity profiling and standards for the filing and post-approval changes',
@@ -102,6 +108,7 @@ const BY_TYPE = new Map(PLAYBOOKS)
 const SOURCE_NAME: Record<string, string> = {
   recall: 'FDA enforcement report', regulatory: 'FDA record', trial: 'ClinicalTrials.gov',
   publication: 'publication', patent: 'patent', standards: 'pharmacopeial record', site: 'company website',
+  news: 'company announcement',
 }
 
 const parseDate = (value?: string | null) => {
@@ -140,6 +147,10 @@ export function buildPitchKit(company: string, molecule: string, signals: PitchS
   const source = SOURCE_NAME[String(anchor.source_type)] || 'public record'
   const when = anchorDate ? ` (${source}, ${monthYear(anchorDate)})` : ` (${source})`
   let hook = `${company}'s ${molecule} shows ${playbook.label}${when}.`
+  if (strongestType === 'company_announcement') {
+    const headline = (anchor.evidence_text || '').split(/\.\s/)[0].trim().slice(0, 160)
+    if (headline) hook = `${company} announced "${headline}"${anchorDate ? ` (${monthYear(anchorDate)})` : ''}.`
+  }
   if (strongestType === 'impurity_recall') {
     const reason = recallReason(anchor.evidence_text)
     hook = `The ${anchorDate ? monthYear(anchorDate) + ' ' : ''}FDA recall of ${company}'s ${molecule}${reason ? ` cited: ${reason}` : ' cited an impurity result'}.`
