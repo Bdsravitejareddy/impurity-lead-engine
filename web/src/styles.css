@@ -204,3 +204,7 @@ th{background:rgba(255,255,255,.35)}
   .sidebar,header,.panel,.kpi,.hero,.company-opportunity-card,.molecule-opportunity-card,.kancol,.kancard,.search,.login-card{background:#f8fbf5;-webkit-backdrop-filter:none;backdrop-filter:none}
 }
 @media(prefers-reduced-motion:reduce){body::before{animation:none}}
+
+/* Technical evidence: date column sized to a formatted date, tags under the title. */
+.evidenceitem{grid-template-columns:110px minmax(0,1fr)}.evidencebody{min-width:0}.evidencetags{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0 2px}.evidencetags .evidencetag{display:inline-block}
+@media(max-width:700px){.evidenceitem{grid-template-columns:1fr;gap:4px}}
