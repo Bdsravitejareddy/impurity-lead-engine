@@ -14,6 +14,7 @@ from impurity_leads.agent_github import export_ready_agent_jobs
 from impurity_leads.execution.stages import run_post_crawl_stages
 from impurity_leads.molecule_discovery import run_molecule_discovery
 from impurity_leads.hunter import run_hunter_people, run_pattern_fallback
+from impurity_leads.contact_cleanup import run_contact_cleanup
 from impurity_leads.outcomes import pipeline_outcome_report
 from impurity_leads.seed_sources import discover_missing_domains
 from impurity_leads.zero_cost import ProviderUsage
@@ -70,6 +71,12 @@ if __name__ == "__main__":
         client = create_client(settings.supabase_url, settings.supabase_secret_key)
         return run_hunter_people(settings, client)
 
+    def contact_cleanup_stage():
+        if not contacts_ready():
+            return {"status": "SKIPPED", "reason": "supabase_credentials_missing"}
+        from supabase import create_client
+        return run_contact_cleanup(create_client(settings.supabase_url, settings.supabase_secret_key))
+
     def pattern_fallback_stage():
         # Free fallback: named contacts without an address get one from the
         # company's email pattern (public pages first, else Hunter's).
@@ -99,6 +106,7 @@ if __name__ == "__main__":
         ("molecule_discovery", molecule_discovery_stage),
         ("contact_research", contact_stage),
         ("contact_repair", contact_repair_stage),
+        ("contact_cleanup", contact_cleanup_stage),
         ("hunter_people", hunter_stage),
         ("email_pattern_fallback", pattern_fallback_stage),
         ("contact_rescore", contact_rescore_stage),

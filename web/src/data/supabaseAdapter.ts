@@ -73,7 +73,7 @@ export async function loadSupabaseData(options: { queryTimeoutMs?: number } = {}
     // Totals only: downloading every signal and molecule row (~10k and ~4k)
     // to count them exceeded the query deadline.
     runCoreQuery('signals_count', signal => supabase!.from('signals').select('id', { count: 'exact', head: true }).abortSignal(signal) as any, diagnostics, timeoutMs),
-    runCoreQuery('contacts', paged(signal => supabase!.from('contacts').select('id,company_id,display_name,title,department,profile_url,primary_email,email_status,primary_phone,phone_status,role_fit_score,contact_confidence,technical_relevance,quality_diagnostics,last_verified_at,merged_into_contact_id').is('merged_into_contact_id', null).abortSignal(signal)), diagnostics, timeoutMs),
+    runCoreQuery('contacts', paged(signal => supabase!.from('contacts').select('id,company_id,display_name,title,department,profile_url,primary_email,email_status,primary_phone,phone_status,role_fit_score,contact_confidence,technical_relevance,quality_diagnostics,last_verified_at,merged_into_contact_id').is('merged_into_contact_id', null).is('hidden_reason', null).abortSignal(signal)), diagnostics, timeoutMs),
     runCoreQuery('companies', paged(signal => supabase!.from('companies').select('id,legal_name,normalized_name,domain,country,company_type').abortSignal(signal)), diagnostics, timeoutMs),
     runCoreQuery('molecules_count', signal => supabase!.from('molecules').select('id', { count: 'exact', head: true }).abortSignal(signal) as any, diagnostics, timeoutMs),
   ])

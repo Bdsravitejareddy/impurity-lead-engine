@@ -57,3 +57,30 @@ def recall_params(page: int = 0, today: date | None = None) -> dict:
         "limit": RECALL_PAGE_SIZE,
         "skip": page * RECALL_PAGE_SIZE,
     }
+
+
+# Company-authored impurity papers (Europe PMC). Newest first, cursor paging.
+PUBLICATIONS_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+PUBLICATION_PAGE_SIZE = 100
+PUBLICATION_MAX_PAGES = 8
+PUBLICATION_LOOKBACK_DAYS = 730
+PUBLICATION_TERMS = ("impurity", "impurities", "degradation products", "degradation product", "degradants",
+                     "forced degradation", "nitrosamine", "nitrosamines", "NDSRI", "genotoxic", "mutagenic impurity",
+                     "related substances", "stability-indicating")
+PUBLICATION_AFFILIATIONS = ("Ltd", "Limited", "Pvt", "Laboratories", "Pharmaceuticals", "Pharma", "Inc", "GmbH",
+                            "LLC", "Corporation", "Therapeutics", "Lifesciences")
+
+
+def publication_params(cursor: str = "*", today: date | None = None) -> dict:
+    today = today or date.today()
+    start = today - timedelta(days=PUBLICATION_LOOKBACK_DAYS)
+    terms = " OR ".join(f'TITLE_ABS:"{term}"' for term in PUBLICATION_TERMS)
+    affiliations = " OR ".join(f'AFF:"{name}"' for name in PUBLICATION_AFFILIATIONS)
+    return {
+        "query": f"({terms}) AND ({affiliations}) AND FIRST_PDATE:[{start:%Y-%m-%d} TO {today:%Y-%m-%d}]",
+        "format": "json",
+        "resultType": "core",
+        "pageSize": PUBLICATION_PAGE_SIZE,
+        "sort": "FIRST_PDATE_D desc",
+        "cursorMark": cursor,
+    }
