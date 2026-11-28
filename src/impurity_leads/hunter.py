@@ -122,6 +122,18 @@ def searches_for_today(account: dict[str, Any], *, today: date, cap: int) -> tup
     return min(cap, math.ceil(remaining / days_left)), remaining
 
 
+def _contact_id(client, company_id: str, normalized: str) -> str:
+    """The existing contact's id, else the stable id every other stage derives.
+
+    contacts.id has no database default, and reusing an existing id keeps
+    upserts from rewriting a primary key that contact_sources points at.
+    """
+    from impurity_leads.molecule_discovery import _stable_contact_id
+    rows = getattr(client.table("contacts").select("id").eq("company_id", company_id)
+                   .eq("normalized_name", normalized).limit(1).execute(), "data", None) or []
+    return rows[0]["id"] if rows else _stable_contact_id(company_id, normalized)
+
+
 def _contact_source(contact_id: str, *, url: str, title: str, publisher: str, source_type: str, now: datetime,
                     evidence_strength: str, why_used: str) -> dict[str, Any]:
     return {
@@ -177,9 +189,11 @@ def run_hunter_people(settings, client, *, http=None, api_key: str | None = None
             for person in result["people"]:
                 if not person["name"]:
                     continue
+                normalized = normalize_person_name(person["name"])
                 row = {
+                    "id": _contact_id(client, company["id"], normalized),
                     "company_id": company["id"],
-                    "normalized_name": normalize_person_name(person["name"]),
+                    "normalized_name": normalized,
                     "display_name": person["name"],
                     "title": person["position"],
                     "department": person["department"],
@@ -189,8 +203,14 @@ def run_hunter_people(settings, client, *, http=None, api_key: str | None = None
                     "first_seen_at": now.isoformat(),
                     "last_seen_at": now.isoformat(),
                 }
-                saved = client.table("contacts").upsert(row, on_conflict="company_id,normalized_name").execute()
-                contact_id = ((getattr(saved, "data", None) or [{}])[0]).get("id")
+                try:
+                    client.table("contacts").upsert(row, on_conflict="company_id,normalized_name").execute()
+                except Exception as error:
+                    # The search is already spent: record the failure, keep going,
+                    # and still mark the company searched below.
+                    errors.append({"domain": domain, "error": type(error).__name__, "detail": str(error)[:160]})
+                    continue
+                contact_id = row["id"]
                 if contact_id:
                     client.table("contact_sources").upsert(_contact_source(
                         contact_id, url=f"https://{domain}", title="Hunter.io domain search", publisher="Hunter.io",

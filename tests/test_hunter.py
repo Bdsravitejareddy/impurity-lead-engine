@@ -37,16 +37,38 @@ class FakeTable:
     def update(self, values):
         return SimpleNamespace(eq=lambda column, value: SimpleNamespace(execute=lambda: self.store.append((self.name, "update", values, value))))
 
+    def select(self, columns):
+        rows, filters = getattr(self, "existing", []), {}
+
+        class Query:
+            def eq(self, column, value):
+                filters[column] = value
+                return self
+
+            def limit(self, count):
+                return self
+
+            def execute(self):
+                return SimpleNamespace(data=[row for row in rows if all(row.get(k) == v for k, v in filters.items())])
+        return Query()
+
 
 class FakeClient:
     def __init__(self, companies, opportunities):
         self.store = []
         self.companies, self.opportunities = companies, opportunities
 
+    existing: list = []
+    fail_upserts = False
+
     def table(self, name):
-        if name == "companies" and not self.store:
-            pass
-        return FakeTable(self.store, name)
+        table = FakeTable(self.store, name)
+        table.existing = self.existing
+        if self.fail_upserts and name == "contacts":
+            def failing(row, on_conflict=None):
+                raise RuntimeError("null value in column id")
+            table.upsert = failing
+        return table
 
 
 def test_stage_is_skipped_without_a_key_and_never_calls_hunter():
@@ -188,3 +210,30 @@ def test_fallback_uses_hunter_pattern_at_lower_confidence_and_never_overwrites(m
     assert [(w[3], w[2]["primary_email"], w[2]["email_status"]) for w in updates] == [("c", "nshah@example.com", "ROLE_ONLY")]
     assert updates[0][2]["contact_confidence"] < 0.5
     assert result["hunter_patterns"] == 1
+
+
+def test_contacts_get_an_id_and_existing_contacts_keep_theirs(monkeypatch):
+    import impurity_leads.hunter as hunter
+    from impurity_leads.molecule_discovery import _stable_contact_id
+    companies = {"c1": {"id": "c1", "legal_name": "Example Pharma", "domain": "example.com", "people_checked_at": None}}
+    monkeypatch.setattr(hunter, "qualified_companies", lambda client, columns: companies)
+    client = FakeClient(companies, [])
+    client.existing = [{"id": "kept-id", "company_id": "c1", "normalized_name": "asha rao"}]
+    http = _http({hunter.ACCOUNT_URL: (200, {}), hunter.HUNTER_URL: (200, PAYLOAD)})
+    run_hunter_people(None, client, http=http, api_key="k", max_searches=1, now=NOW)
+    ids = {row["normalized_name"]: row["id"] for name, op, row, *_ in client.store if name == "contacts" and op == "upsert"}
+    assert ids["asha rao"] == "kept-id"
+    assert ids["ravi kumar"] == _stable_contact_id("c1", "ravi kumar")
+
+
+def test_a_failed_save_still_marks_the_company_searched(monkeypatch):
+    import impurity_leads.hunter as hunter
+    companies = {"c1": {"id": "c1", "legal_name": "Example Pharma", "domain": "example.com", "people_checked_at": None}}
+    monkeypatch.setattr(hunter, "qualified_companies", lambda client, columns: companies)
+    client = FakeClient(companies, [])
+    client.fail_upserts = True
+    http = _http({hunter.ACCOUNT_URL: (200, {}), hunter.HUNTER_URL: (200, PAYLOAD)})
+    result = run_hunter_people(None, client, http=http, api_key="k", max_searches=1, now=NOW)
+    assert result["status"] == "COMPLETED" and result["errors"]
+    # Marked searched, so tomorrow's allowance is not spent on the same company again.
+    assert [row for name, op, row, *_ in client.store if name == "companies" and op == "update"]
