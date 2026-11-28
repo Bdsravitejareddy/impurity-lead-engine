@@ -6,6 +6,7 @@ export type CompanyOpportunityGroup = {
   maxScore: number
   priority: string
   signalCount: number
+  evidenceBreakdown: string
   latestEvidence: string | null
   topContact: any | null
   readiness: 'ready' | 'research'
@@ -16,6 +17,32 @@ const priorityRank: Record<string, number> = { HOT: 3, HIGH: 2, REVIEW: 1 }
 function dateValue(value: any) {
   const parsed = value ? Date.parse(String(value)) : NaN
   return Number.isNaN(parsed) ? 0 : parsed
+}
+
+// What a source is, from its URL, in words a salesperson uses.
+const EVIDENCE_KINDS: [RegExp, string, string][] = [
+  [/clinicaltrials\.gov/i, 'trial', 'trials'],
+  [/enforcement|recall/i, 'FDA recall', 'FDA recalls'],
+  [/fda\.gov/i, 'FDA record', 'FDA records'],
+  [/europepmc|pubmed|doi\.org|ncbi\.nlm/i, 'paper', 'papers'],
+  [/patent/i, 'patent', 'patents'],
+]
+
+export function evidenceKind(url: string): [string, string] {
+  const found = EVIDENCE_KINDS.find(([pattern]) => pattern.test(url || ''))
+  return found ? [found[1], found[2]] : ['company web page', 'company web pages']
+}
+
+/** '5 trials · 1 FDA record': distinct sources behind a company's leads, by kind. */
+export function describeEvidence(leads: any[]): string {
+  const urls = new Set<string>(leads.flatMap((lead) => (lead.evidence || []).map((item: any) => String(item.url || item.source_key || item.title || ''))).filter(Boolean))
+  const counts = new Map<string, [number, string, string]>()
+  for (const url of urls) {
+    const [one, many] = evidenceKind(url)
+    const current = counts.get(one) || [0, one, many]
+    counts.set(one, [current[0] + 1, one, many])
+  }
+  return Array.from(counts.values()).sort((a, b) => b[0] - a[0]).map(([n, one, many]) => `${n} ${n === 1 ? one : many}`).join(' · ')
 }
 
 function latestFor(lead: any) {
@@ -39,6 +66,7 @@ export function groupCompanyOpportunities(leads: any[]): CompanyOpportunityGroup
       maxScore: 0,
       priority: 'REVIEW',
       signalCount: 0,
+      evidenceBreakdown: '',
       latestEvidence: null,
       topContact: null,
       readiness: 'research',
@@ -59,6 +87,7 @@ export function groupCompanyOpportunities(leads: any[]): CompanyOpportunityGroup
       maxScore: Math.max(...opportunities.map((lead) => Number(lead.opportunity?.score || 0)), 0),
       priority: opportunities[0]?.opportunity?.priority || 'REVIEW',
       signalCount: signalKeys.size,
+      evidenceBreakdown: describeEvidence(opportunities),
       latestEvidence: latest,
       topContact: contacts.sort((a: any, b: any) => Number(b.role_fit_score || b.confidence || 0) - Number(a.role_fit_score || a.confidence || 0))[0] || null,
       readiness: opportunities.some((lead) => (lead.contacts || []).length > 0) ? 'ready' : 'research',

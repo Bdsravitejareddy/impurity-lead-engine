@@ -209,3 +209,4 @@ th{background:rgba(255,255,255,.35)}
 /* Technical evidence: date column sized to a formatted date, tags under the title. */
 .evidenceitem{grid-template-columns:110px minmax(0,1fr)}.evidencebody{min-width:0}.evidencetags{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0 2px}.evidencetags .evidencetag{display:inline-block}
 @media(max-width:700px){.evidenceitem{grid-template-columns:1fr;gap:4px}}
+.sectionsource{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--green-deep,#3d7890);text-decoration:none;margin-top:10px}
