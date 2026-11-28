@@ -15,6 +15,7 @@ from impurity_leads.execution.stages import run_post_crawl_stages
 from impurity_leads.molecule_discovery import run_molecule_discovery
 from impurity_leads.hunter import run_hunter_people, run_pattern_fallback
 from impurity_leads.contact_cleanup import run_contact_cleanup
+from impurity_leads.tenders import run_tender_alerts
 from impurity_leads.outcomes import pipeline_outcome_report
 from impurity_leads.seed_sources import discover_missing_domains
 from impurity_leads.zero_cost import ProviderUsage
@@ -71,6 +72,13 @@ if __name__ == "__main__":
         client = create_client(settings.supabase_url, settings.supabase_secret_key)
         return run_hunter_people(settings, client)
 
+    def tender_alerts_stage():
+        # Off unless the GeM alert inbox is configured; see impurity_leads.tenders.
+        if not (contacts_ready() and os.environ.get("GEM_ALERT_IMAP_USER")):
+            return {"status": "SKIPPED", "reason": "gem_alert_inbox_not_configured"}
+        from supabase import create_client
+        return run_tender_alerts(create_client(settings.supabase_url, settings.supabase_secret_key))
+
     def contact_cleanup_stage():
         if not contacts_ready():
             return {"status": "SKIPPED", "reason": "supabase_credentials_missing"}
@@ -114,6 +122,7 @@ if __name__ == "__main__":
         ("opportunity_evidence_queue", opportunity_stage),
         ("agent_work_export", agent_stage),
         ("pipeline_outcomes", outcomes_stage),
+        ("gem_tender_alerts", tender_alerts_stage),
     ])
     for stage in post_crawl.stages:
         print(json.dumps({"event": stage.name, "status": stage.status, "processed": stage.processed, "sources": stage.sources, "claims": stage.claims, "links": stage.links, "error": stage.error, "metrics": stage.metrics}, sort_keys=True))

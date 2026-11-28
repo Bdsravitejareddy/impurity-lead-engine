@@ -37,6 +37,9 @@ jobs:
           # Publication authors are the free people-finder fallback; on unless turned off.
           MOLECULE_DISCOVERY_ENABLED: ${{ vars.MOLECULE_DISCOVERY_ENABLED || 'true' }}
           HUNTER_API_KEY: ${{ secrets.HUNTER_API_KEY }}
+          # Inbox that receives GeM bid alerts (an app password, read-only use).
+          GEM_ALERT_IMAP_USER: ${{ secrets.GEM_ALERT_IMAP_USER }}
+          GEM_ALERT_IMAP_PASSWORD: ${{ secrets.GEM_ALERT_IMAP_PASSWORD }}
           HUNTER_MAX_SEARCHES_PER_RUN: ${{ vars.HUNTER_MAX_SEARCHES_PER_RUN || '5' }}
           PATENTSVIEW_API_KEY: ${{ secrets.PATENTSVIEW_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

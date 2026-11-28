@@ -204,3 +204,4 @@ th{background:rgba(255,255,255,.35)}
   .sidebar,header,.panel,.kpi,.hero,.company-opportunity-card,.molecule-opportunity-card,.kancol,.kancard,.search,.login-card{background:#f8fbf5;-webkit-backdrop-filter:none;backdrop-filter:none}
 }
 @media(prefers-reduced-motion:reduce){body::before{animation:none}}
+.demand-intro{margin-bottom:16px}.demand-intro p{margin-top:6px}
