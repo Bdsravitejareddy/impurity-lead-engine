@@ -94,7 +94,7 @@ def execute_run(store,settings,seeds,output_dir,*,workers=6,reporter=None,client
     handlers=CrawlHandlers(settings,client_factory=client_factory,reporter=reporter,provider_usage=provider_usage)
     grouped=defaultdict(list)
     for seed in seeds:grouped[seed.domain].append(asdict(seed))
-    initial=[task('source:clinical_trials',STAGES[0],identifier='clinical_trials'),task('source:fda',STAGES[0],identifier='fda'),task('source:fda_recalls',STAGES[0],identifier='fda_recalls')]
+    initial=[task('source:clinical_trials',STAGES[0],identifier='clinical_trials'),task('source:fda',STAGES[0],identifier='fda'),task('source:fda_recalls',STAGES[0],identifier='fda_recalls'),task('source:publications',STAGES[0],identifier='publications')]
     initial.extend(task(f'company:{i:06}:{domain}',STAGES[1],identifier=items[0]['company_name'],domain=domain,checkpoint={'seeds':items}) for i,(domain,items) in enumerate(grouped.items()))
     initial += [task('process:all',STAGES[2]),task('persist:all',STAGES[4]),task('export:all',STAGES[5])]
     store.plan(initial)
@@ -201,7 +201,7 @@ def run_daily(settings,root,*,workers=6,fresh=False):
         # the CSV alone left production with zero seeds.
         seeds=load_run_seeds(settings,root)
         safe=settings.model_dump(exclude={'supabase_url','supabase_secret_key','workers'})
-        material={'settings':safe,'seeds':[asdict(s) for s in seeds],'sources':['clinical_trials','fda','fda_recalls','company_site','common_crawl'],
+        material={'settings':safe,'seeds':[asdict(s) for s in seeds],'sources':['clinical_trials','fda','fda_recalls','publications','company_site','common_crawl'],
                   'schema_version':VERSION,'behavior_version':behavior_version()}
         run=store.begin(fingerprint(material),str(uuid4()),fresh,{'schema_version':VERSION,'seed_count':len(seeds),'workers':workers,'planning_complete':False})
         reporter.emit({'event':'run_resumed' if run.get('resumed') else 'run_started','run_id':run['id'],'status':'running'})

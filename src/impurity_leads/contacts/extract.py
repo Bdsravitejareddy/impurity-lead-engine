@@ -18,6 +18,9 @@ from impurity_leads.contacts.normalize import (
 _NAME_RE = re.compile(r"^[A-Za-zÀ-ÖØ-öø-ÿ'’.-]+(?:\s+[A-Za-zÀ-ÖØ-öø-ÿ'’.-]+){1,4}$")
 _VISIBLE_EMAIL_RE = re.compile(r"[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.I)
 
+# Senior titles that the role hints above do not cover.
+_TITLE_EXTRA = ("chief", "officer", "president", "ceo", "cfo", "coo", "cso", "cto", "chair", "founder", "partner", "lead")
+
 _ROLE_HINTS = (
     "director",
     "head",
@@ -75,10 +78,34 @@ def _iter_jsonld_people(value):
             yield from _iter_jsonld_people(value["@graph"])
 
 
+# Section headings on leadership pages that look like a two-to-five-word name.
+_HEADING_WORDS = {
+    "board", "directors", "director", "team", "management", "leadership", "contacts", "contact", "key", "our",
+    "the", "committee", "committees", "about", "executive", "executives", "council", "members", "people",
+    "profile", "profiles", "overview", "officers", "governance", "investor", "investors", "relations", "media",
+    "global", "corporate", "senior", "advisory", "scientific", "meet", "us", "company", "group", "office",
+}
+TITLE_MAX = 120
+
+
 def _plausible_name(value: str) -> bool:
     clean = re.sub(r"\s+", " ", value.strip())
     normalized = normalize_person_name(clean)
-    return bool(normalized and _NAME_RE.match(clean.replace("Dr. ", "").replace("Dr ", "")))
+    if not (normalized and _NAME_RE.match(clean.replace("Dr. ", "").replace("Dr ", ""))):
+        return False
+    words = [word.lower().strip(".,") for word in clean.split()]
+    # "Board of Directors", "The Management Team", "Key Contacts".
+    return not any(word in _HEADING_WORDS for word in words) and "of" not in words
+
+
+def _clean_title(candidate: str, name: str) -> str | None:
+    """A short job title: the person's name removed, biographies rejected."""
+    text = re.sub(r"\s+", " ", candidate).strip()
+    if text.casefold().startswith(name.casefold()):
+        text = text[len(name):].strip(" ,–—-:|")
+    if not text or len(text) > TITLE_MAX or not any(hint in text.casefold() for hint in _ROLE_HINTS + _TITLE_EXTRA):
+        return None
+    return text
 
 
 def _candidate_from_fields(
@@ -207,12 +234,12 @@ def extract_contacts_from_html(
         name = " ".join(heading.stripped_strings)
         if not _plausible_name(name):
             continue
-        title = None
-        for node in card.find_all(["p", "span", "div"], limit=8):
-            candidate_title = " ".join(node.stripped_strings)
-            if candidate_title and candidate_title != name and any(hint in candidate_title.casefold() for hint in _ROLE_HINTS):
-                title = candidate_title
-                break
+        # The shortest nearby text that reads as a title, never a whole biography.
+        titles = [
+            cleaned for node in card.find_all(["p", "span", "div", "h4", "h5", "h6"], limit=12)
+            if (cleaned := _clean_title(" ".join(node.stripped_strings), name))
+        ]
+        title = min(titles, key=len) if titles else None
         mail = card.find("a", href=re.compile(r"^mailto:", re.I))
         visible_email = _VISIBLE_EMAIL_RE.search(text)
         tel = card.find("a", href=re.compile(r"^tel:", re.I))

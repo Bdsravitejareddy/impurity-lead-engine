@@ -7,7 +7,8 @@ import httpx
 from impurity_leads.adapters.clinical_trials import ClinicalTrialsAdapter
 from impurity_leads.adapters.fda import FDAAdapter
 from impurity_leads.adapters.fda_recalls import FDARecallAdapter
-from impurity_leads.adapters.queries import CLINICAL_TRIALS_URL, FDA_PAGE_SIZE, FDA_URL, MAX_PAGES, RECALL_MAX_PAGES, RECALL_PAGE_SIZE, RECALLS_URL, clinical_trials_params, fda_params, recall_params
+from impurity_leads.adapters.publications import PublicationAdapter
+from impurity_leads.adapters.queries import CLINICAL_TRIALS_URL, FDA_PAGE_SIZE, FDA_URL, MAX_PAGES, RECALL_MAX_PAGES, RECALL_PAGE_SIZE, RECALLS_URL, PUBLICATION_MAX_PAGES, PUBLICATIONS_URL, clinical_trials_params, fda_params, publication_params, recall_params
 from impurity_leads.adapters.company_site import CompanySiteAdapter
 from impurity_leads.adapters.common_crawl import CommonCrawlAdapter, IndexNameCache
 from impurity_leads.contacts.discovery import contact_candidate_urls
@@ -21,6 +22,9 @@ from impurity_leads.execution.retry import TaskFailure, classify_error, Database
 from impurity_leads.models import Opportunity
 from impurity_leads.seeds import relevant_candidate_urls
 from impurity_leads.zero_cost import ProviderUsage
+
+
+RXNORM_URL='https://rxnav.nlm.nih.gov/REST/rxcui.json'
 
 
 # Each child sitemap costs a paced request; the newest ones carry current pages.
@@ -66,6 +70,22 @@ class CrawlHandlers:
                     total=((payload.get('meta') or {}).get('results') or {}).get('total',0)
                     # openFDA answers 404 for a page past the end, so stop on the total.
                     if (page+1)*RECALL_PAGE_SIZE>=total: break
+            elif source=='publications':
+                adapter=PublicationAdapter(is_drug=self._rxnorm_checker(client));cursor='*';pages=0
+                for _ in range(PUBLICATION_MAX_PAGES):
+                    try:
+                        payload=self._structured_page(client,PUBLICATIONS_URL,publication_params(cursor))
+                    except (DatabaseUnavailable,InterruptedTask):raise
+                    except Exception:
+                        # Europe PMC is sometimes slow; keep the newest pages already read
+                        # rather than fail the source. The first page still retries.
+                        if pages:break
+                        raise
+                    pages+=1
+                    for item in (payload.get('resultList') or {}).get('result',[]): records.extend(adapter.parse(item))
+                    following=payload.get('nextCursorMark')
+                    if not following or following==cursor: break
+                    cursor=following
             else:
                 adapter=FDAAdapter()
                 for page in range(MAX_PAGES):
@@ -75,6 +95,20 @@ class CrawlHandlers:
             result={'records':[r.model_dump(mode='json') for r in records]}
             ctx.save_progress({'fetched':True},result)
             return result
+    def _rxnorm_checker(self,client):
+        """name -> True when RxNorm (NLM, free) knows it as a drug; cached per run.
+        A lookup that fails counts as unknown and is skipped, never guessed."""
+        cache={}
+        def is_drug(name):
+            key=name.strip().lower()
+            if key not in cache:
+                try:
+                    response=client.get(RXNORM_URL,params={'name':name,'search':2},headers={'User-Agent':self.settings.user_agent})
+                    cache[key]=response.status_code==200 and bool(((response.json().get('idGroup') or {}).get('rxnormId')))
+                except Exception:
+                    cache[key]=False
+            return cache[key]
+        return is_drug
     def _structured_page(self,client,url,params):
         from impurity_leads.cli import _structured_headers
         response=client.get(url,params=params,headers=_structured_headers(self.settings))
